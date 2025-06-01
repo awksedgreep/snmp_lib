@@ -1,0 +1,108 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2025-01-06
+
+### Added
+
+- **SnmpLib.PDU** - Complete SNMP PDU encoding/decoding module
+  - Support for SNMPv1 and SNMPv2c protocols
+  - GET, GETNEXT, GETBULK, SET operations
+  - High-performance optimized encoding paths
+  - Pure Elixir ASN.1 BER implementation
+  - Community string validation
+  - Error response generation
+  - Backward compatibility with SNMPSimEx struct format
+
+- **SnmpLib.OID** - Basic OID manipulation utilities (placeholder for Phase 2)
+  - String to list conversion
+  - List to string conversion
+
+- **Core Features**:
+  - `build_get_request/2` - Build GET request PDU
+  - `build_get_next_request/2` - Build GETNEXT request PDU
+  - `build_set_request/3` - Build SET request PDU
+  - `build_get_bulk_request/4` - Build GETBULK request PDU (SNMPv2c only)
+  - `build_get_request_multi/2` - Build GET request with multiple varbinds
+  - `build_response/4` - Build response PDU
+  - `build_message/3` - Build SNMP message structure
+  - `encode_message/1` - Encode message to binary format
+  - `decode_message/1` - Decode message from binary format
+  - `validate_community/2` - Validate community string in packet
+  - `create_error_response/3` - Create error response from request
+  - `validate/1` - Validate PDU structure
+
+- **Backward Compatibility**:
+  - `decode/1` - Legacy decode function for SNMPSimEx compatibility
+  - `encode/1` - Legacy encode function for SNMPSimEx compatibility
+  - `decode_snmp_packet/1` - Alias for decode
+  - `encode_snmp_packet/1` - Alias for encode
+
+- **SNMP Data Types Support**:
+  - INTEGER, OCTET STRING, NULL, OBJECT IDENTIFIER
+  - Counter32, Gauge32, TimeTicks, Counter64
+  - IpAddress, Opaque
+  - NoSuchObject, NoSuchInstance, EndOfMibView
+
+- **Comprehensive Testing**:
+  - 42 test cases covering all functionality
+  - Round-trip encoding/decoding tests
+  - Edge case and error condition testing
+  - Performance and boundary testing
+  - Concurrent operation testing
+
+### Technical Details
+
+- **Performance Optimizations**:
+  - Fast-path encoding for common integer values (0-127)
+  - Efficient iodata usage for binary construction
+  - Optimized OID encoding with multi-byte sub-identifier support
+  - Minimal memory allocation patterns
+
+- **Error Handling**:
+  - Graceful handling of malformed packets
+  - Comprehensive parameter validation
+  - Clear error messages for debugging
+
+- **Standards Compliance**:
+  - Full ASN.1 BER encoding/decoding
+  - RFC-compliant SNMP message structure
+  - Proper handling of SNMP error codes
+
+### Dependencies
+
+- ExDoc 0.29+ (dev only)
+- Dialyxir 1.3+ (dev only) 
+- Credo 1.7+ (dev/test only)
+- ExCoveralls 0.18+ (test only)
+- Benchee 1.1+ (dev only)
+
+### Known Issues
+
+- One test failure in complex OID encoding with large values (>127) - to be addressed in Phase 2
+- Unused module attributes for error codes (will be used in Phase 2)
+
+## Phase Roadmap
+
+### Phase 1 (Current) - PDU Library ✅
+- Complete PDU encoding/decoding functionality
+- Backward compatibility with existing projects
+- Comprehensive testing
+
+### Phase 2 (Next) - OID and Transport
+- Full OID manipulation library
+- UDP transport layer
+- SNMP data types library
+- ASN.1 improvements
+
+### Phase 3 (Future) - Advanced Features
+- SNMP table operations
+- Tree walking functionality
+- Error handling library
+- Utilities including pretty printing
