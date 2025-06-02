@@ -728,6 +728,31 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:string, value) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:auto, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:auto, value) when is_binary(value), do: encode_octet_string_fast(value)
+  
+  # Handle tuple formats from decoder  
+  defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@counter32, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@gauge32, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@timeticks, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:counter64, value}) when is_integer(value) and value >= 0 do
+    encode_counter64(@counter64, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:ip_address, value}) when is_binary(value) and byte_size(value) == 4 do
+    encode_tag_length_value(@ip_address, 4, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:opaque, value}) when is_binary(value) do
+    length = byte_size(value)
+    encode_tag_length_value(@opaque_type, length, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:unknown, value}) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:end_of_mib_view, _), do: <<@end_of_mib_view, 0x00>>
