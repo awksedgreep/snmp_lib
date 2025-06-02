@@ -6,4 +6,7 @@
    
 2. The main OTP SNMP compiler directory so I can browse the full structure:  = https://github.com/erlang/otp/blob/master/lib/snmp/src/compile/snmpc.erl
 
+Additional file references:
 
+snmpc_to_hrl  https://github.com/erlang/otp/raw/refs/heads/master/lib/snmp/src/compile/snmpc_mib_to_hrl.erl
+snmpc_misc  https://github.com/erlang/otp/raw/refs/heads/master/lib/snmp/src/compile/snmpc_misc.erl

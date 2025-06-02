@@ -1,0 +1,8 @@
+TestMib DEFINITIONS ::= BEGIN
+  testObject OBJECT-TYPE
+    SYNTAX INTEGER
+    ACCESS read-only
+    STATUS current
+    DESCRIPTION "Test object"
+    ::= { test 1 }
+END

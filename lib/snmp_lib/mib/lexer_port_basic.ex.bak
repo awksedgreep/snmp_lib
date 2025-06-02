@@ -15,7 +15,7 @@ defmodule SnmpLib.MIB.Lexer do
   @reserved_words MapSet.new([
     "ACCESS", "AGENT-CAPABILITIES", "APPLICATION", "AUGMENTS", "BEGIN",
     "BITS", "CHOICE", "CONTACT-INFO", "COUNTER", "COUNTER32", "COUNTER64", 
-    "DEFVAL", "DEFINITIONS", "DESCRIPTION", "DISPLAY-HINT", "END", "ENTERPRISE",
+    "DEFINITIONS", "DESCRIPTION", "DISPLAY-HINT", "END", "ENTERPRISE",
     "EXPORTS", "FROM", "GAUGE", "GAUGE32", "GROUP", "IDENTIFIER",
     "IMPLICIT", "IMPORTS", "INDEX", "INTEGER", "INTEGER32", "IpAddress",
     "LAST-UPDATED", "MAX-ACCESS", "MIN-ACCESS", "MODULE", "MODULE-COMPLIANCE",
@@ -23,11 +23,7 @@ defmodule SnmpLib.MIB.Lexer do
     "OBJECT-GROUP", "OBJECT-IDENTITY", "OBJECT-TYPE", "OBJECTS", "OCTET",
     "OF", "ORGANIZATION", "REFERENCE", "REVISION", "SEQUENCE", "SIZE",
     "STATUS", "STRING", "SYNTAX", "TEXTUAL-CONVENTION", "TimeTicks",
-    "TRAP-TYPE", "UNITS", "UNIVERSAL", "Unsigned32", "VARIABLES", "WRITE-SYNTAX",
-    # Additional SNMPv2 keywords from complete grammar
-    "Counter64", "MANDATORY-GROUPS", "GROUP", "COMPLIANCE", "MIN-ACCESS", 
-    "PRODUCT-RELEASE", "SUPPORTS", "INCLUDES", "VARIATION", "CREATION-REQUIRES",
-    "AGENT-CAPABILITIES"
+    "TRAP-TYPE", "UNITS", "UNIVERSAL", "Unsigned32", "VARIABLES", "WRITE-SYNTAX"
   ])
 
   @doc """
@@ -65,32 +61,28 @@ defmodule SnmpLib.MIB.Lexer do
   # Handle string literals
   defp do_tokenize([?" | rest], line, acc) do
     {string_value, rest_after_string} = collect_string(rest, [])
-    pos = %{line: line, column: nil}
-    token = {:string, List.to_string(string_value), pos}
+    token = {:string, line, List.to_string(string_value)}
     do_tokenize(rest_after_string, line, [token | acc])
   end
 
   # Handle quoted literals
   defp do_tokenize([?' | rest], line, acc) do
     {quote_value, rest_after_quote} = collect_quote(rest, [])
-    pos = %{line: line, column: nil}
-    token = {:quote, List.to_string(quote_value), pos}
+    token = {:quote, line, List.to_string(quote_value)}
     do_tokenize(rest_after_quote, line, [token | acc])
   end
 
   # Handle integers
   defp do_tokenize([ch | _] = input, line, acc) when ch >= ?0 and ch <= ?9 do
     {int_value, rest} = get_integer(input, 0)
-    pos = %{line: line, column: nil}
-    token = {:integer, int_value, pos}
+    token = {:integer, line, int_value}
     do_tokenize(rest, line, [token | acc])
   end
 
   # Handle negative integers
   defp do_tokenize([?- | [ch | _] = rest], line, acc) when ch >= ?0 and ch <= ?9 do
     {int_value, rest_after_int} = get_integer(rest, 0)
-    pos = %{line: line, column: nil}
-    token = {:integer, -int_value, pos}
+    token = {:integer, line, -int_value}
     do_tokenize(rest_after_int, line, [token | acc])
   end
 
@@ -101,84 +93,9 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest, line, [token | acc])
   end
 
-  # Handle multi-character symbols first
-  defp do_tokenize([?:, ?:, ?= | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :assign, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?., ?. | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :range, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  # Handle single character symbols
-  defp do_tokenize([?{ | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :open_brace, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?} | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :close_brace, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?( | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :open_paren, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?) | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :close_paren, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?[ | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :open_bracket, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?] | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :close_bracket, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?, | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :comma, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?. | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :dot, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?; | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :semicolon, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  defp do_tokenize([?| | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {:symbol, :pipe, pos}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  # Handle single character tokens (fallback)
+  # Handle single character tokens
   defp do_tokenize([ch | rest], line, acc) do
-    pos = %{line: line, column: nil}
-    token = {List.to_atom([ch]), pos}
+    token = {List.to_atom([ch]), line}
     do_tokenize(rest, line, [token | acc])
   end
 
@@ -216,7 +133,6 @@ defmodule SnmpLib.MIB.Lexer do
   # Create appropriate token for name
   defp make_name_token(name, line) do
     name_string = List.to_string(name)
-    pos = %{line: line, column: nil}
     
     cond do
       MapSet.member?(@reserved_words, name_string) ->
@@ -225,10 +141,13 @@ defmodule SnmpLib.MIB.Lexer do
                       |> String.replace("-", "_")
                       |> String.downcase()
                       |> String.to_atom()
-        {:keyword, keyword_atom, pos}
+        {keyword_atom, line}
+      hd(name) >= ?A and hd(name) <= ?Z ->
+        # Variable (starts with uppercase)
+        {:variable, line, name_string}
       true ->
-        # All non-keywords are identifiers 
-        {:identifier, name_string, pos}
+        # Atom (starts with lowercase)
+        {:atom, line, name_string}
     end
   end
 
