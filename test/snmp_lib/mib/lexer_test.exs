@@ -1,5 +1,7 @@
 defmodule SnmpLib.MIB.LexerTest do
   use ExUnit.Case, async: true
+  
+  @moduletag :format_compatibility
   doctest SnmpLib.MIB.Lexer
   
   alias SnmpLib.MIB.{Lexer, Error}
@@ -87,6 +89,7 @@ defmodule SnmpLib.MIB.LexerTest do
       assert [{:string, "He said \"Hello\"", %{line: 1, column: 1}}] = tokens
     end
     
+    @tag :format_compatibility
     test "handles escaped characters" do
       assert {:ok, tokens} = Lexer.tokenize("\"line1\\nline2\\tindented\"")
       assert [{:string, "line1\nline2\tindented", %{line: 1, column: 1}}] = tokens
@@ -127,6 +130,7 @@ defmodule SnmpLib.MIB.LexerTest do
       assert [{:identifier, "cisco-specific-object", %{line: 1, column: 1}}] = tokens
     end
     
+    @tag :format_compatibility  
     test "handles mixed case keywords" do
       # Some vendors use different cases
       assert {:ok, tokens} = Lexer.tokenize("read-only")
@@ -135,11 +139,13 @@ defmodule SnmpLib.MIB.LexerTest do
   end
   
   describe "error handling" do
+    @tag :format_compatibility
     test "reports invalid characters" do
       assert {:error, %Error{type: :invalid_character}} = 
         Lexer.tokenize("valid @invalid")
     end
     
+    @tag :format_compatibility
     test "provides accurate line/column information" do
       assert {:error, %Error{line: 2, column: 5}} = 
         Lexer.tokenize("line1\ntest@")

@@ -363,13 +363,29 @@ defmodule SnmpLib.PDU do
   """
   @spec create_error_response(pdu(), error_status(), non_neg_integer()) :: pdu()
   def create_error_response(request_pdu, error_status, error_index \\ 0) do
-    %{
-      type: :get_response,
-      request_id: Map.get(request_pdu, :request_id, 1),
-      error_status: error_status,
-      error_index: error_index,
-      varbinds: Map.get(request_pdu, :varbinds, [])
-    }
+    # Handle both PDU struct and map formats
+    case request_pdu do
+      %__MODULE__{} = pdu ->
+        # PDU struct format
+        %__MODULE__{
+          version: pdu.version,
+          community: pdu.community,
+          pdu_type: 0xA2,  # GET_RESPONSE
+          request_id: pdu.request_id,
+          error_status: error_status,
+          error_index: error_index,
+          variable_bindings: pdu.variable_bindings || []
+        }
+      _ ->
+        # Legacy map format for backward compatibility
+        %{
+          type: :get_response,
+          request_id: Map.get(request_pdu, :request_id, 1),
+          error_status: error_status,
+          error_index: error_index,
+          varbinds: Map.get(request_pdu, :varbinds, [])
+        }
+    end
   end
 
   @doc """
@@ -715,6 +731,39 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:end_of_mib_view, _), do: <<@end_of_mib_view, 0x00>>
+  
+  # Complex SNMP types
+  defp encode_snmp_value_fast({:object_identifier, oid}, _) when is_list(oid) do
+    case encode_oid_fast(oid) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast({:object_identifier, oid}, _) when is_binary(oid) do
+    case String.split(oid, ".") |> Enum.map(&String.to_integer/1) do
+      oid_list when is_list(oid_list) ->
+        case encode_oid_fast(oid_list) do
+          {:ok, encoded} -> encoded
+          {:error, _} -> <<@null, 0x00>>
+        end
+      _ -> <<@null, 0x00>>
+    end
+  rescue
+    _ -> <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast({:counter32, value}, _) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@counter32, value)
+  end
+  defp encode_snmp_value_fast({:gauge32, value}, _) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@gauge32, value)
+  end
+  defp encode_snmp_value_fast({:timeticks, value}, _) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@timeticks, value)
+  end
+  defp encode_snmp_value_fast({:counter64, value}, _) when is_integer(value) and value >= 0 do
+    encode_counter64(@counter64, value)
+  end
+  
   defp encode_snmp_value_fast(_, :null), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(_, _), do: <<@null, 0x00>>
 
@@ -773,6 +822,31 @@ defmodule SnmpLib.PDU do
   end
   defp encode_length_ber(length) do
     <<0x84, length::32>>
+  end
+
+  # Helper functions for encoding unsigned integers and counter64
+  defp encode_unsigned_integer(tag, value) when is_integer(value) and value >= 0 do
+    bytes = encode_unsigned_bytes(value)
+    length = byte_size(bytes)
+    encode_tag_length_value(tag, length, bytes)
+  end
+
+  defp encode_counter64(tag, value) when is_integer(value) and value >= 0 do
+    bytes = <<value::64>>
+    length = byte_size(bytes)
+    encode_tag_length_value(tag, length, bytes)
+  end
+
+  defp encode_unsigned_bytes(0), do: <<0>>
+  defp encode_unsigned_bytes(value) when value > 0 do
+    bytes = :binary.encode_unsigned(value, :big)
+    # Ensure the most significant bit is 0 for unsigned integers
+    case bytes do
+      <<bit::1, _::bitstring>> when bit == 1 ->
+        <<0>> <> bytes
+      _ ->
+        bytes
+    end
   end
 
   defp encode_oid_fast(oid_list) when is_list(oid_list) and length(oid_list) >= 2 do

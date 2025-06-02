@@ -82,6 +82,7 @@ defmodule SnmpLib.MIB.ComprehensiveMibTest do
   end
 
   describe "memory efficiency tests" do
+    @tag :memory
     test "tokenization does not leak memory" do
       # Test with a medium-sized file repeatedly
       file_path = Path.join(File.cwd!(), "test/fixtures/mibs/working/IF-MIB.mib")

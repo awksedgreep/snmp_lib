@@ -9,6 +9,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
   @performance_target 1.05 # 5% improvement minimum (realistic regression test)
 
   describe "lexer performance benchmarks" do
+    @tag :performance
     test "simple MIB content performance" do
       content = """
       TestMib DEFINITIONS ::= BEGIN
@@ -43,6 +44,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
         "Performance regression: #{Float.round(rate/1_000_000, 2)}M tok/s < target #{Float.round(@baseline_performance * @performance_target / 1_000_000, 2)}M tok/s"
     end
 
+    @tag :performance
     test "keyword tokenization efficiency" do
       # Test with keyword-heavy content
       content = """
@@ -63,6 +65,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
         "Keyword processing too slow: #{Float.round(rate/1_000_000, 2)}M tok/s"
     end
 
+    @tag :performance
     test "string processing performance" do
       # Test with string-heavy content
       strings = for i <- 1..20, do: "\"Description string #{i} with some content\""
@@ -79,6 +82,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
         "String processing too slow: #{Float.round(rate/1_000_000, 2)}M tok/s"
     end
 
+    @tag :performance
     test "integer parsing performance" do
       # Test with integer-heavy content  
       integers = for i <- 1..100, do: to_string(i * 1000 + i)
@@ -97,6 +101,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
   end
 
   describe "optimization verification" do
+    @tag :performance
     test "token structure uses tuples not maps" do
       {:ok, tokens} = SnmpLib.MIB.Lexer.tokenize("test 123")
       
@@ -113,6 +118,7 @@ defmodule SnmpLib.MIB.LexerPerformanceTest do
       end
     end
 
+    @tag :performance
     test "reserved words use pre-computed atoms" do
       {:ok, tokens} = SnmpLib.MIB.Lexer.tokenize("BEGIN MODULE-IDENTITY END")
       

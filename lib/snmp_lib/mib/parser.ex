@@ -20,15 +20,8 @@ defmodule SnmpLib.MIB.Parser do
     output_dir = Path.join([__DIR__, "..", "..", "..", "src"])
     File.mkdir_p!(output_dir)
     
-    # Compile the grammar using Erlang's yecc (suppress warnings)
-    old_stderr = Process.group_leader()
-    {:ok, null_device} = File.open("/dev/null", [:write])
-    Process.group_leader(self(), null_device)
-    
+    # Compile the grammar using Erlang's yecc
     result = :yecc.file(to_charlist(grammar_file))
-    
-    File.close(null_device)
-    Process.group_leader(self(), old_stderr)
     
     case result do
       {:ok, _generated_file} ->
@@ -118,6 +111,29 @@ defmodule SnmpLib.MIB.Parser do
           {:error, reason} ->
             Logger.debug("Tokenize failed: #{inspect(reason)}")
             {:error, reason}
+        end
+        
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
+  Parse pre-tokenized MIB tokens using the Erlang SNMP grammar.
+  This function takes tokens directly without tokenizing.
+  """
+  def parse_tokens(tokens) when is_list(tokens) do
+    # First ensure parser is compiled
+    case init_parser() do
+      {:ok, parser_module} ->
+        # Parse using the generated parser
+        case apply(parser_module, :parse, [tokens]) do
+          {:ok, parse_tree} ->
+            {:ok, convert_to_elixir_format(parse_tree)}
+            
+          {:error, reason} ->
+            Logger.debug("Parse failed: #{inspect(reason)}")
+            {:error, convert_error_to_string(reason)}
         end
         
       {:error, reason} ->
@@ -688,6 +704,12 @@ defmodule SnmpLib.MIB.Parser do
   defp clean_description(desc), do: desc
 
   # Convert charlist error messages to binary strings
+  defp convert_error_to_string({mib_name, module, message}) when is_binary(mib_name) and is_atom(module) do
+    # Handle Erlang parser errors like {"MIB-NAME", :parser_module, "error message"}
+    message_str = if is_list(message), do: convert_deep_charlist(message), else: to_string(message)
+    "#{mib_name}: #{message_str}"
+  end
+  
   defp convert_error_to_string({line, module, message}) when is_list(message) do
     {line, module, convert_deep_charlist(message)}
   end

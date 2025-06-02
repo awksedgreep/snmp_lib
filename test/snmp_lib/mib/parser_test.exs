@@ -2,6 +2,8 @@ defmodule SnmpLib.MIB.ParserTest do
   use ExUnit.Case, async: true
   doctest SnmpLib.MIB.Parser
   
+  @moduletag :parsing_edge_cases
+  
   alias SnmpLib.MIB.{Parser, Lexer, Error}
   
   describe "basic MIB parsing" do

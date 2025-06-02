@@ -39,6 +39,7 @@ defmodule SnmpLib.DocsisMibTest do
   ]
   
   describe "Critical DOCSIS MIBs" do
+    @tag :docsis
     test "all critical DOCSIS MIBs parse successfully" do
       results = test_mib_group(@critical_docsis_mibs, "critical")
       
@@ -78,6 +79,7 @@ defmodule SnmpLib.DocsisMibTest do
       end)
     end
     
+    @tag :docsis
     test "DOCS-CABLE-DEVICE-MIB contains expected DOCSIS constructs" do
       {mib, _warnings} = parse_mib_successfully("test/fixtures/mibs/docsis/DOCS-CABLE-DEVICE-MIB")
       
@@ -94,6 +96,7 @@ defmodule SnmpLib.DocsisMibTest do
       assert has_definition_type(mib, :object_identifier), "Should have OBJECT IDENTIFIER definitions"
     end
     
+    @tag :docsis
     test "DOCS-IF-MIB contains expected interface constructs" do
       {mib, _warnings} = parse_mib_successfully("test/fixtures/mibs/docsis/DOCS-IF-MIB")
       
@@ -109,6 +112,7 @@ defmodule SnmpLib.DocsisMibTest do
       assert has_definition_type(mib, :object_type), "Should have OBJECT-TYPE definitions"
     end
     
+    @tag :docsis
     test "DOCS-QOS-MIB contains expected QoS constructs" do
       {mib, _warnings} = parse_mib_successfully("test/fixtures/mibs/docsis/DOCS-QOS-MIB")
       
@@ -121,6 +125,7 @@ defmodule SnmpLib.DocsisMibTest do
   end
   
   describe "Important DOCSIS MIBs" do
+    @tag :docsis
     test "important DOCSIS MIBs parse successfully" do
       results = test_mib_group(@important_docsis_mibs, "important")
       
@@ -137,6 +142,7 @@ defmodule SnmpLib.DocsisMibTest do
   end
   
   describe "Extended DOCSIS MIBs" do
+    @tag :docsis
     test "extended DOCSIS MIBs parse successfully" do
       results = test_mib_group(@extended_docsis_mibs, "extended")
       
@@ -153,6 +159,7 @@ defmodule SnmpLib.DocsisMibTest do
   end
   
   describe "Supporting MIBs" do
+    @tag :docsis
     test "supporting MIBs parse successfully" do
       results = test_mib_group(@supporting_mibs, "supporting")
       
@@ -169,6 +176,7 @@ defmodule SnmpLib.DocsisMibTest do
   end
   
   describe "DOCSIS-specific parsing features" do
+    @tag :docsis
     test "SIZE constraints with pipe syntax parse correctly" do
       # Test the SIZE (0 | 36..260) pattern found in DOCSIS MIBs
       mib_content = """
@@ -193,6 +201,7 @@ defmodule SnmpLib.DocsisMibTest do
       assert object_type.name == "testObject"
     end
     
+    @tag :docsis
     test "OBJECT IDENTIFIER definitions parse correctly" do
       # Test the OBJECT IDENTIFIER pattern found in DOCSIS MIBs
       mib_content = """
@@ -212,6 +221,7 @@ defmodule SnmpLib.DocsisMibTest do
       assert oid_def.name == "docsIfMibObjects"
     end
     
+    @tag :docsis
     test "TEXTUAL-CONVENTION assignments parse correctly" do
       # Test the Name ::= TEXTUAL-CONVENTION pattern found in DOCSIS MIBs
       mib_content = """

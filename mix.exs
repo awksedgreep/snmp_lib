@@ -4,12 +4,13 @@ defmodule SnmpLib.MixProject do
   def project do
     [
       app: :snmp_lib,
-      version: "0.1.0",
+      version: "0.1.1",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       compilers: [:yecc] ++ Mix.compilers(),
       deps: deps(),
-      description: "Unified SNMP library with PDU encoding/decoding, OID manipulation, and SNMP utilities",
+      description:
+        "Unified SNMP library with PDU encoding/decoding, OID manipulation, and SNMP utilities",
       package: package(),
       docs: [
         main: "SnmpLib",
