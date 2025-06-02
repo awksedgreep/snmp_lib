@@ -7,6 +7,7 @@ defmodule SnmpLib.MixProject do
       version: "0.1.0",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
+      compilers: [:yecc] ++ Mix.compilers(),
       deps: deps(),
       description: "Unified SNMP library with PDU encoding/decoding, OID manipulation, and SNMP utilities",
       package: package(),

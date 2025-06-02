@@ -2,8 +2,8 @@
 
 Application.put_env(:snmp_lib, :environment, :test)
 
-defmodule DebugTokens do
-  def test_tokenization do
+defmodule DebugConvertedTokens do
+  def test_converted_tokens do
     simple_mib = """
     TEST-MIB DEFINITIONS ::= BEGIN
     
@@ -23,17 +23,14 @@ defmodule DebugTokens do
     END
     """
     
-    IO.puts("🔍 Testing tokenization...")
+    IO.puts("🔍 Testing converted tokens...")
     
-    case SnmpLib.MIB.Lexer.tokenize(simple_mib) do
+    case SnmpLib.MIB.ActualParser.tokenize(simple_mib) do
       {:ok, tokens} ->
-        IO.puts("✅ Our tokenizer produced #{length(tokens)} tokens:")
-        Enum.each(tokens, fn token ->
-          IO.puts("   #{inspect(token)}")
+        IO.puts("✅ Converted tokens for grammar:")
+        Enum.with_index(tokens, 1) |> Enum.each(fn {token, index} ->
+          IO.puts("   #{index}. #{inspect(token)}")
         end)
-        
-        IO.puts("\n🧪 Expected format for Erlang grammar:")
-        IO.puts("   Tokens should be: {atom, line, value} or {atom, line}")
         
       {:error, reason} ->
         IO.puts("❌ Tokenization failed: #{inspect(reason)}")
@@ -41,4 +38,4 @@ defmodule DebugTokens do
   end
 end
 
-DebugTokens.test_tokenization()
+DebugConvertedTokens.test_converted_tokens()
