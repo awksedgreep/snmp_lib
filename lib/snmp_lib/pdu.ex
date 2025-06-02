@@ -726,8 +726,39 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:auto, :null), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(:integer, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:string, value) when is_binary(value), do: encode_octet_string_fast(value)
+  defp encode_snmp_value_fast(:object_identifier, value) when is_list(value) do
+    case encode_oid_fast(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast(:object_identifier, value) when is_binary(value) do
+    try do
+      case String.split(value, ".") |> Enum.map(&String.to_integer/1) do
+        oid_list when is_list(oid_list) ->
+          case encode_oid_fast(oid_list) do
+            {:ok, encoded} -> encoded
+            {:error, _} -> <<@null, 0x00>>
+          end
+        _ -> <<@null, 0x00>>
+      end
+    rescue
+      _ -> <<@null, 0x00>>
+    end
+  end
   defp encode_snmp_value_fast(:auto, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:auto, value) when is_binary(value), do: encode_octet_string_fast(value)
+  defp encode_snmp_value_fast(:auto, value) when is_list(value) do
+    # Assume it's an OID if it's a list of non-negative integers
+    if Enum.all?(value, &(is_integer(&1) and &1 >= 0)) do
+      case encode_oid_fast(value) do
+        {:ok, encoded} -> encoded
+        {:error, _} -> <<@null, 0x00>>
+      end
+    else
+      <<@null, 0x00>>
+    end
+  end
   
   # Handle tuple formats from decoder  
   defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 do
@@ -752,6 +783,26 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:object_identifier, oid}) when is_list(oid) do
+    case encode_oid_fast(oid) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast(:auto, {:object_identifier, oid}) when is_binary(oid) do
+    try do
+      case String.split(oid, ".") |> Enum.map(&String.to_integer/1) do
+        oid_list when is_list(oid_list) ->
+          case encode_oid_fast(oid_list) do
+            {:ok, encoded} -> encoded
+            {:error, _} -> <<@null, 0x00>>
+          end
+        _ -> <<@null, 0x00>>
+      end
+    rescue
+      _ -> <<@null, 0x00>>
+    end
+  end
   defp encode_snmp_value_fast(:auto, {:unknown, value}) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
@@ -903,12 +954,36 @@ defmodule SnmpLib.PDU do
   end
   defp encode_oid_subids_fast(_, _), do: {:error, :invalid_subidentifier}
 
-  defp encode_subid_multibyte(subid, acc) when subid < 128 do
-    :erlang.iolist_to_binary(Enum.reverse([subid | acc]))
+  # Encode a subidentifier using ASN.1 BER multibyte encoding
+  defp encode_subid_multibyte(subid, _acc) do
+    encode_subid_multibyte_correct(subid)
   end
-  defp encode_subid_multibyte(subid, acc) do
-    byte = (subid &&& 0x7F) ||| 0x80
-    encode_subid_multibyte(subid >>> 7, [byte | acc])
+  
+  # Correct implementation: build bytes from most significant to least significant
+  defp encode_subid_multibyte_correct(subid) when subid < 128 do
+    <<subid>>
+  end
+  defp encode_subid_multibyte_correct(subid) do
+    # Build list of 7-bit groups from least to most significant
+    bytes = build_multibyte_list(subid, [])
+    # Convert to binary with high bits set correctly
+    bytes_with_high_bits = set_high_bits(bytes)
+    :erlang.iolist_to_binary(bytes_with_high_bits)
+  end
+  
+  # Build list of 7-bit values from least to most significant
+  defp build_multibyte_list(subid, acc) when subid < 128 do
+    [subid | acc]  # Most significant byte (no more bits)
+  end
+  defp build_multibyte_list(subid, acc) do
+    lower_7_bits = subid &&& 0x7F
+    build_multibyte_list(subid >>> 7, [lower_7_bits | acc])
+  end
+  
+  # Set high bits: all bytes except the last one get the high bit set
+  defp set_high_bits([last]), do: [last]  # Last byte has no high bit
+  defp set_high_bits([first | rest]) do
+    [first ||| 0x80 | set_high_bits(rest)]  # Set high bit on all but last
   end
 
   # Comprehensive decoding implementation (from SNMPSimEx)
@@ -1169,6 +1244,12 @@ defmodule SnmpLib.PDU do
   end
   defp parse_value(<<@null, 0, rest::binary>>) do
     {:ok, {:null, rest}}
+  end
+  defp parse_value(<<@object_identifier, length, oid_data::binary-size(length), rest::binary>>) do
+    case decode_oid_data(oid_data) do
+      {:ok, oid} -> {:ok, {{:object_identifier, oid}, rest}}
+      {:error, _} -> {:ok, {{:unknown, oid_data}, rest}}
+    end
   end
   defp parse_value(<<tag, length, value::binary-size(length), rest::binary>>) do
     decoded_value = case tag do
