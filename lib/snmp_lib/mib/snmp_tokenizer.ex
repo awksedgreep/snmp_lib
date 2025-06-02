@@ -383,8 +383,8 @@ defmodule SnmpLib.MIB.SnmpTokenizer do
   end
   
   defp scan_string([?" | chars], acc, _start_line, state) do
-    # End of string
-    string_value = acc |> Enum.reverse()  # Keep as charlist for Erlang compatibility
+    # End of string - convert to Elixir string
+    string_value = acc |> Enum.reverse() |> List.to_string()
     new_state = %{state | chars: chars}
     {{:string, state.line, string_value}, new_state}
   end

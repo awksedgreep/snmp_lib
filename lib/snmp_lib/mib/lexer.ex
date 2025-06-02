@@ -11,6 +11,8 @@ defmodule SnmpLib.MIB.Lexer do
   - Reduced memory allocations through streaming
   - Tail-call optimization for recursive functions
   """
+  
+  require Logger
 
   # Complete reserved words list from Erlang snmpc_tok.erl - Extended from official source
   # Optimized: Pre-computed keyword atoms to avoid runtime string processing
@@ -344,10 +346,10 @@ defmodule SnmpLib.MIB.Lexer do
     
     case tokenize(test_input) do
       {:ok, tokens} ->
-        IO.puts("Tokenization successful!")
-        Enum.each(tokens, fn token -> IO.inspect(token) end)
+        Logger.info("Tokenization successful!")
+        Enum.each(tokens, fn token -> Logger.debug(inspect(token)) end)
       {:error, reason} ->
-        IO.puts("Tokenization failed: #{reason}")
+        Logger.error("Tokenization failed: #{reason}")
     end
   end
 end

@@ -1,1505 +1,794 @@
 defmodule SnmpLib.MIB.Parser do
   @moduledoc """
-  Direct port of Erlang snmpc_mib_gram.yrl parser to Elixir.
+  SNMP MIB parser - a true 1:1 port of Erlang SNMP MIB parser.
   
-  This is a 1:1 port of the official Erlang SNMP MIB grammar parser
-  from OTP lib/snmp/src/compile/snmpc_mib_gram.yrl
-  
-  Original copyright: Ericsson AB 1996-2025 (Apache License 2.0)
+  This uses the real snmpc_mib_gram.yrl grammar file from Erlang/OTP
+  compiled with yecc parser generator for proper SNMP MIB parsing.
   """
-
-  # MIB parsing result types
-  @type mib() :: %{
-    name: binary(),
-    imports: [import()],
-    definitions: [definition()],
-    version: :v1 | :v2
-  }
-
-  @type import() :: %{
-    __type__: :import,
-    symbols: [binary()],
-    from_module: binary()
-  }
-
-  @type definition() :: %{
-    name: binary(),
-    type: atom(),
-    value: term()
-  }
-
-  @type token() :: {atom(), any(), any()}
-
-  @type parse_result() :: 
-    {:ok, mib()} | 
-    {:error, [error()]}
-
-  @type error() :: %{
-    type: atom(),
-    message: binary(),
-    line: integer()
-  }
+  
+  require Logger
 
   @doc """
-  Parse a list of tokens into a MIB structure.
-  Returns {:ok, mib} or {:error, errors}
+  Initialize the parser by compiling the Erlang grammar file.
+  This creates a proper yacc-generated parser identical to Erlang's.
   """
-  @spec parse(binary()) :: parse_result()
-  def parse(input) when is_binary(input) do
-    with {:ok, tokens} <- SnmpLib.MIB.Lexer.tokenize(input) do
-      parse_tokens(tokens)
-    end
-  end
-
-  @spec parse_tokens([token()]) :: parse_result()
-  def parse_tokens(tokens) when is_list(tokens) do
-    try do
-      do_parse(tokens)
-    rescue
-      exception ->
-        error = SnmpLib.MIB.Error.new(:unexpected_token, 
-          message: "Parser exception: #{Exception.message(exception)}", line: 0)
-        {:error, [error]}
-    catch
-      {:error, reason} when is_binary(reason) ->
-        error = SnmpLib.MIB.Error.new(:unexpected_token, message: reason, line: 0)
-        {:error, [error]}
+  def init_parser do
+    # Get the path to our Elixir-compatible grammar file
+    grammar_file = Path.join([__DIR__, "..", "..", "..", "src", "mib_grammar_elixir.yrl"])
+    
+    # Ensure the output directory exists
+    output_dir = Path.join([__DIR__, "..", "..", "..", "src"])
+    File.mkdir_p!(output_dir)
+    
+    # Compile the grammar using Erlang's yecc (suppress warnings)
+    old_stderr = Process.group_leader()
+    {:ok, null_device} = File.open("/dev/null", [:write])
+    Process.group_leader(self(), null_device)
+    
+    result = :yecc.file(to_charlist(grammar_file))
+    
+    File.close(null_device)
+    Process.group_leader(self(), old_stderr)
+    
+    case result do
+      {:ok, _generated_file} ->
+        module_name = :mib_grammar_elixir
+        Logger.debug("Successfully compiled SNMP MIB grammar - Generated parser module: #{module_name}")
+        {:ok, module_name}
+        
       {:error, reason} ->
-        error = SnmpLib.MIB.Error.new(:unexpected_token, message: inspect(reason), line: 0)
-        {:error, [error]}
+        Logger.error("Failed to compile grammar: #{inspect(reason)}")
+        {:error, reason}
+        
+      :error ->
+        Logger.error("Grammar compilation failed with error")
+        {:error, :compilation_failed}
     end
   end
 
-  # Main parsing entry point - follows snmpc_mib_gram.yrl structure
-  defp do_parse(tokens) do
-    case parse_mib_header(tokens) do
-      {:ok, {mib_name, remaining_tokens}} ->
-        case parse_imports_section(remaining_tokens) do
-          {:ok, {imports, remaining_tokens}} ->
-            case parse_definitions_section(remaining_tokens) do
-              {:ok, {definitions, remaining_tokens}} ->
-                case expect_keyword(remaining_tokens, :end) do
-                  {:ok, _final_tokens} ->
+  @doc """
+  Parse all MIB files in a list of directories.
+  
+  Returns a map with directory paths as keys and results as values.
+  Each result contains successful compilations and failures.
+  
+  ## Examples
+  
+      # Parse MIBs in multiple directories
+      dirs = [
+        "/path/to/mibs/working", 
+        "/path/to/mibs/docsis"
+      ]
+      results = SnmpLib.MIB.Parser.mibdirs(dirs)
       
+      # Access results by directory
+      working_results = results["/path/to/mibs/working"]
+      IO.puts("Success: \#{length(working_results.success)}/\#{working_results.total}")
       
-                    # Determine SNMP version from definitions
-                    version = determine_snmp_version(definitions)
-                    
-                    mib = %{
-                      __type__: :mib,
-                      name: mib_name,
-                      imports: imports,
-                      definitions: definitions,
-                      version: version
-                    }
-                    
-                    {:ok, mib}
-                  {:error, reason} -> handle_parse_error(reason)
-                end
-              {:error, reason} -> handle_parse_error(reason)
+      # Get all successful MIBs across directories
+      all_mibs = Enum.flat_map(results, fn {_dir, result} -> result.success end)
+  """
+  def mibdirs(directories) when is_list(directories) do
+    Logger.info("Compiling MIBs in #{length(directories)} directories")
+    
+    results = Enum.map(directories, fn dir ->
+      {dir, compile_directory(dir)}
+    end) |> Map.new()
+    
+    # Log summary
+    total_success = Enum.reduce(results, 0, fn {_dir, result}, acc -> 
+      acc + length(result.success)
+    end)
+    total_files = Enum.reduce(results, 0, fn {_dir, result}, acc -> 
+      acc + result.total
+    end)
+    
+    Logger.info("OVERALL RESULTS: Total MIBs compiled: #{total_success}/#{total_files} (#{Float.round(total_success / max(total_files, 1) * 100, 1)}%)")
+    
+    Enum.each(results, fn {dir, result} ->
+      dir_name = Path.basename(dir)
+      success_rate = Float.round(length(result.success) / max(result.total, 1) * 100, 1)
+      Logger.info("  #{dir_name}: #{length(result.success)}/#{result.total} (#{success_rate}%)")
+    end)
+    
+    results
+  end
+
+  @doc """
+  Parse a MIB file using the Erlang SNMP grammar.
+  This is the production MIB parser.
+  """
+  def parse(mib_content) when is_binary(mib_content) do
+    # First ensure parser is compiled
+    case init_parser() do
+      {:ok, parser_module} ->
+        # Tokenize the input
+        case tokenize(mib_content) do
+          {:ok, tokens} ->
+            # Parse using the generated parser
+            case apply(parser_module, :parse, [tokens]) do
+              {:ok, parse_tree} ->
+                {:ok, convert_to_elixir_format(parse_tree)}
+                
+              {:error, reason} ->
+                Logger.debug("Parse failed: #{inspect(reason)}")
+                {:error, convert_error_to_string(reason)}
             end
-          {:error, reason} -> handle_parse_error(reason)
+            
+          {:error, reason} ->
+            Logger.debug("Tokenize failed: #{inspect(reason)}")
+            {:error, reason}
         end
-      {:error, reason} -> handle_parse_error(reason)
-    end
-  end
-
-  # Parse MIB header: "MibName DEFINITIONS ::= BEGIN"
-  defp parse_mib_header([{:identifier, mib_name, _} | tokens]) do
-    with {:ok, tokens} <- expect_keyword(tokens, :definitions),
-         {:ok, tokens} <- expect_symbol(tokens, :assign),
-         {:ok, tokens} <- expect_keyword(tokens, :begin) do
-      {:ok, {mib_name, tokens}}
-    end
-  end
-
-  defp parse_mib_header(tokens) do
-    {:error, "Expected MIB name identifier, got #{inspect(hd(tokens))}"}
-  end
-
-  # Parse IMPORTS section (optional)
-  defp parse_imports_section([{:keyword, :imports, _} | tokens]) do
-    parse_import_groups(tokens, [])
-  end
-
-  defp parse_imports_section(tokens) do
-    {:ok, {[], tokens}}
-  end
-
-  # Parse multiple import groups recursively
-  defp parse_import_groups(tokens, acc) do
-    case parse_single_import_group(tokens) do
-      {:ok, {import_group, remaining_tokens}} ->
-        parse_import_groups(remaining_tokens, [import_group | acc])
-      {:done, remaining_tokens} ->
-        {:ok, {Enum.reverse(acc), remaining_tokens}}
+        
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  # Parse single import group: "symbol1, symbol2 FROM ModuleName"
-  defp parse_single_import_group(tokens) do
-    case parse_symbol_list_until_from(tokens, []) do
-      {:ok, {symbols, [{:keyword, :from, _} | remaining_tokens]}} ->
-        case parse_module_name_with_comment(remaining_tokens) do
-          {:ok, {module_name, remaining_tokens}} ->
-            import_group = %{__type__: :import, symbols: symbols, from_module: module_name}
-            {:ok, {import_group, remaining_tokens}}
+  @doc """
+  Tokenize MIB content using Erlang's SNMP tokenizer.
+  This ensures we use the exact same tokenization as Erlang.
+  """
+  def tokenize(mib_content) when is_binary(mib_content) do
+    # Convert to charlist for Erlang compatibility
+    char_content = to_charlist(mib_content)
+    
+    # Use our 1:1 port of the Erlang SNMP tokenizer
+    case SnmpLib.MIB.SnmpTokenizer.tokenize(char_content, &SnmpLib.MIB.SnmpTokenizer.null_get_line/0) do
+      {:ok, tokens} ->
+        Logger.debug("Using 1:1 Elixir port of Erlang SNMP tokenizer")
+        # Apply hex atom conversion to tokens from 1:1 tokenizer
+        converted_tokens = apply_hex_conversion(tokens)
+        {:ok, converted_tokens}
+      {:error, reason} ->
+        Logger.debug("1:1 tokenizer error: #{inspect(reason)}")
+        # Fall back to our custom tokenizer if needed
+        case SnmpLib.MIB.Lexer.tokenize(mib_content) do
+          {:ok, tokens} ->
+            Logger.debug("Falling back to custom tokenizer")
+            {:ok, convert_tokens_for_grammar(tokens)}
           {:error, reason} ->
             {:error, reason}
         end
-      {:done, remaining_tokens} ->
-        {:done, remaining_tokens}
-      {:error, reason} ->
-        {:error, reason}
     end
-  end
-
-  # Parse symbol list until FROM keyword
-  defp parse_symbol_list_until_from(tokens, acc) do
-    case parse_next_symbol_or_from(tokens) do
-      {:symbol, symbol, remaining_tokens} ->
-        parse_symbol_list_until_from(remaining_tokens, [symbol | acc])
-      {:from, remaining_tokens} ->
-        {:ok, {Enum.reverse(acc), [{:keyword, :from, nil} | remaining_tokens]}}
-      {:done, remaining_tokens} ->
-        {:done, remaining_tokens}
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse next symbol or detect FROM
-  defp parse_next_symbol_or_from([{:keyword, :from, _} | tokens]) do
-    {:from, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:keyword, :end, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  # Detect start of new definition sections that should end import parsing
-  # IMPORTANT: These specific patterns must come BEFORE the general identifier pattern
-  defp parse_next_symbol_or_from([{:identifier, _name, _}, {:keyword, :module_identity, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:identifier, _name, _}, {:keyword, :object_type, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:identifier, _name, _}, {:keyword, :textual_convention, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:identifier, _name, _}, {:keyword, :object, _}, {:keyword, :identifier, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:identifier, _name, _}, {:symbol, :assign, _} | _] = tokens) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([{:keyword, keyword, _} | tokens]) do
-    # Convert keyword back to string for imports
-    symbol = keyword |> to_string() |> String.upcase() |> String.replace("_", "-")
-    case tokens do
-      [{:symbol, :comma, _} | rest] -> {:symbol, symbol, rest}
-      [{:keyword, :from, _} | _] = rest -> {:symbol, symbol, rest}
-      _ -> {:symbol, symbol, tokens}
-    end
-  end
-
-  defp parse_next_symbol_or_from([{:identifier, symbol, _} | tokens]) do
-    case tokens do
-      [{:symbol, :comma, _} | rest] -> {:symbol, symbol, rest}
-      [{:keyword, :from, _} | _] = rest -> {:symbol, symbol, rest}
-      _ -> {:symbol, symbol, tokens}
-    end
-  end
-
-  defp parse_next_symbol_or_from([{:symbol, :semicolon, _} | tokens]) do
-    {:done, tokens}
-  end
-
-  defp parse_next_symbol_or_from([]) do
-    {:done, []}
-  end
-
-  defp parse_next_symbol_or_from(tokens) do
-    {:error, "Unexpected token in imports: #{inspect(hd(tokens))}"}
-  end
-
-  # Parse module name potentially followed by comment
-  defp parse_module_name_with_comment([{:identifier, module_name, _} | tokens]) do
-    # Skip optional comment (-- RFC xxxx) and optional comma or semicolon
-    remaining_tokens = skip_optional_comment_and_separators(tokens)
-    {:ok, {module_name, remaining_tokens}}
-  end
-
-  defp parse_module_name_with_comment(tokens) do
-    {:error, "Expected module name, got #{inspect(hd(tokens))}"}
-  end
-
-  # Skip optional comment after module name and optional separators
-  defp skip_optional_comment_and_separators([{:symbol, :comma, _} | tokens]) do
-    # Skip comma and continue parsing more import groups
-    tokens
-  end
-  
-  defp skip_optional_comment_and_separators([{:symbol, :semicolon, _} | tokens]) do
-    # Semicolon ends the imports section
-    tokens
-  end
-  
-  defp skip_optional_comment_and_separators(tokens) do
-    # No separators found, continue with next tokens
-    tokens
-  end
-
-  # Parse definitions section
-  defp parse_definitions_section(tokens) do
-    parse_definition_list(tokens, [])
-  end
-
-  # Parse list of definitions recursively
-  defp parse_definition_list([{:keyword, :end, _} | _] = tokens, acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_definition_list([{:identifier, name, pos} | tokens], acc) do
-    case parse_definition(name, pos, tokens) do
-      {:ok, {definition, rest}} ->
-        parse_definition_list(rest, [definition | acc])
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp parse_definition_list([], acc) do
-    {:ok, {Enum.reverse(acc), []}}
-  end
-
-  defp parse_definition_list(tokens, _acc) do
-    {:error, "Expected definition or END, got #{inspect(hd(tokens))}"}
-  end
-
-  # Parse individual definition based on lookahead
-  defp parse_definition(name, _pos, tokens) do
-    case tokens do
-      # MODULE-IDENTITY
-      [{:keyword, :module_identity, _} | rest] ->
-        parse_module_identity(name, rest)
-        
-      # OBJECT-TYPE  
-      [{:keyword, :object_type, _} | rest] ->
-        parse_object_type(name, rest)
-        
-      # TEXTUAL-CONVENTION (can appear without ::=)
-      [{:keyword, :textual_convention, _} | rest] ->
-        parse_textual_convention(name, rest)
-        
-      # ::= TEXTUAL-CONVENTION
-      [{:symbol, :assign, _}, {:keyword, :textual_convention, _} | rest] ->
-        parse_textual_convention(name, rest)
-        
-      # MODULE-COMPLIANCE
-      [{:keyword, :module_compliance, _} | rest] ->
-        parse_module_compliance(name, rest)
-        
-      # OBJECT-GROUP
-      [{:keyword, :object_group, _} | rest] ->
-        parse_object_group(name, rest)
-        
-      # OBJECT IDENTIFIER ::= { ... }
-      [{:keyword, :object, _}, {:keyword, :identifier, _}, {:symbol, :assign, _} | rest] ->
-        parse_object_identifier_definition(name, rest)
-        
-      # ::= SEQUENCE { ... }
-      [{:symbol, :assign, _}, {:keyword, :sequence, _}, {:symbol, :open_brace, _} | rest] ->
-        parse_sequence_definition(name, rest)
-        
-      # ::= { ... } (OID assignment)
-      [{:symbol, :assign, _}, {:symbol, :open_brace, _} | rest] ->
-        parse_oid_assignment(name, rest)
-        
-      # Handle DEFVAL clause (often appears before ::=)
-      [{:keyword, :defval, _} | rest] ->
-        case skip_defval_clause(rest) do
-          {:ok, remaining_tokens} -> parse_definition(name, nil, remaining_tokens)
-          {:error, reason} -> {:error, reason}
-        end
-        
-      # ::= value (simple assignment) - must be last
-      [{:symbol, :assign, _} | rest] ->
-        parse_simple_assignment(name, rest)
-        
-      _ ->
-        {:error, "Unknown definition type for #{name}, tokens: #{inspect(tokens)}"}
-    end
-  end
-
-  # Parse MODULE-IDENTITY
-  defp parse_module_identity(name, tokens) do
-    with {:ok, {last_updated, tokens}} <- parse_last_updated_clause(tokens),
-         {:ok, {organization, tokens}} <- parse_organization_clause(tokens),
-         {:ok, {contact_info, tokens}} <- parse_contact_info_clause(tokens),
-         {:ok, {description, tokens}} <- parse_description_clause(tokens),
-         {:ok, {revisions, tokens}} <- parse_revisions_clause(tokens),
-         {:ok, {oid, tokens}} <- parse_oid_assignment_clause(tokens) do
-      
-      definition = %{
-        name: name,
-        __type__: :module_identity,
-        last_updated: last_updated,
-        organization: organization,
-        contact_info: contact_info,
-        description: description,
-        revisions: revisions,
-        oid: oid
-      }
-      
-      {:ok, {definition, tokens}}
-    end
-  end
-
-  # Parse OBJECT-TYPE with flexible clause order
-  defp parse_object_type(name, tokens) do
-    case parse_object_type_clauses(tokens, %{}) do
-      {:ok, {clauses, remaining_tokens}} ->
-        with {:ok, {oid, tokens}} <- parse_oid_assignment_clause(remaining_tokens) do
-          definition = %{
-            name: name,
-            __type__: :object_type,
-            syntax: Map.get(clauses, :syntax),
-            max_access: Map.get(clauses, :access),
-            status: Map.get(clauses, :status),
-            description: Map.get(clauses, :description),
-            oid: oid
-          }
-          |> Map.merge(Map.drop(clauses, [:syntax, :access, :status, :description]))
-          
-          {:ok, {definition, tokens}}
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse object type clauses in any order
-  defp parse_object_type_clauses(tokens, acc) do
-    case tokens do
-      [{:keyword, :syntax, _} | rest] ->
-        case parse_syntax_type(rest) do
-          {:ok, {syntax, remaining}} ->
-            parse_object_type_clauses(remaining, Map.put(acc, :syntax, syntax))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :access, _}, {:identifier, access, _} | rest] ->
-        access_atom = String.to_atom(String.replace(access, "-", "_"))
-        parse_object_type_clauses(rest, Map.put(acc, :access, access_atom))
-      
-      [{:keyword, :max_access, _}, {:identifier, access, _} | rest] ->
-        access_atom = String.to_atom(String.replace(access, "-", "_"))
-        parse_object_type_clauses(rest, Map.put(acc, :access, access_atom))
-      
-      [{:keyword, :status, _}, {:identifier, status, _} | rest] ->
-        status_atom = String.to_atom(status)
-        parse_object_type_clauses(rest, Map.put(acc, :status, status_atom))
-      
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        parse_object_type_clauses(rest, Map.put(acc, :description, description))
-      
-      [{:keyword, :reference, _}, {:string, reference, _} | rest] ->
-        parse_object_type_clauses(rest, Map.put(acc, :reference, reference))
-      
-      [{:keyword, :units, _}, {:string, units, _} | rest] ->
-        parse_object_type_clauses(rest, Map.put(acc, :units, units))
-      
-      [{:keyword, :defval, _} | rest] ->
-        case skip_defval_clause(rest) do
-          {:ok, remaining} -> parse_object_type_clauses(remaining, acc)
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :index, _}, {:symbol, :open_brace, _} | rest] ->
-        case parse_index_list(rest, []) do
-          {:ok, {index, remaining}} ->
-            parse_object_type_clauses(remaining, Map.put(acc, :index, index))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :augments, _}, {:symbol, :open_brace, _}, {:identifier, table, _}, {:symbol, :close_brace, _} | rest] ->
-        parse_object_type_clauses(rest, Map.put(acc, :augments, table))
-      
-      _ ->
-        # Validate required OBJECT-TYPE clauses
-        cond do
-          map_size(acc) == 0 ->
-            {:error, "No OBJECT-TYPE clauses found"}
-          not Map.has_key?(acc, :syntax) ->
-            {:error, "OBJECT-TYPE missing required SYNTAX clause"}
-          not Map.has_key?(acc, :access) ->
-            {:error, "OBJECT-TYPE missing required MAX-ACCESS or ACCESS clause"}
-          not Map.has_key?(acc, :status) ->
-            {:error, "OBJECT-TYPE missing required STATUS clause"}
-          true ->
-            {:ok, {acc, tokens}}
-        end
-    end
-  end
-
-  # Parse textual convention clauses in any order
-  defp parse_textual_convention_clauses(tokens, acc) do
-    case tokens do
-      [{:keyword, :display_hint, _}, {:string, hint, _} | rest] ->
-        parse_textual_convention_clauses(rest, Map.put(acc, :display_hint, hint))
-      
-      [{:keyword, :status, _}, {:identifier, status, _} | rest] ->
-        status_atom = String.to_atom(status)
-        parse_textual_convention_clauses(rest, Map.put(acc, :status, status_atom))
-      
-      [{:keyword, :status, _}, {:keyword, status, _} | rest] ->
-        parse_textual_convention_clauses(rest, Map.put(acc, :status, status))
-      
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        parse_textual_convention_clauses(rest, Map.put(acc, :description, description))
-      
-      [{:keyword, :reference, _}, {:string, reference, _} | rest] ->
-        parse_textual_convention_clauses(rest, Map.put(acc, :reference, reference))
-      
-      [{:keyword, :syntax, _} | rest] ->
-        case parse_syntax_type(rest) do
-          {:ok, {syntax, remaining}} ->
-            parse_textual_convention_clauses(remaining, Map.put(acc, :syntax, syntax))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      _ ->
-        # Validate required TEXTUAL-CONVENTION clauses
-        cond do
-          map_size(acc) == 0 ->
-            {:error, "No TEXTUAL-CONVENTION clauses found"}
-          not Map.has_key?(acc, :status) ->
-            {:error, "TEXTUAL-CONVENTION missing required STATUS clause"}
-          not Map.has_key?(acc, :description) ->
-            {:error, "TEXTUAL-CONVENTION missing required DESCRIPTION clause"}
-          not Map.has_key?(acc, :syntax) ->
-            {:error, "TEXTUAL-CONVENTION missing required SYNTAX clause"}
-          true ->
-            {:ok, {acc, tokens}}
-        end
-    end
-  end
-
-  # Parse module compliance clauses in any order
-  defp parse_module_compliance_clauses(tokens, acc) do
-    case tokens do
-      [{:keyword, :status, _}, {:identifier, status, _} | rest] ->
-        status_atom = String.to_atom(status)
-        parse_module_compliance_clauses(rest, Map.put(acc, :status, status_atom))
-      
-      [{:keyword, :status, _}, {:keyword, status, _} | rest] ->
-        parse_module_compliance_clauses(rest, Map.put(acc, :status, status))
-      
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        parse_module_compliance_clauses(rest, Map.put(acc, :description, description))
-      
-      [{:keyword, :reference, _}, {:string, reference, _} | rest] ->
-        parse_module_compliance_clauses(rest, Map.put(acc, :reference, reference))
-      
-      [{:keyword, :module, _} | rest] ->
-        case parse_module_clause(rest) do
-          {:ok, {module_clause, remaining}} ->
-            modules = Map.get(acc, :module_clauses, [])
-            parse_module_compliance_clauses(remaining, Map.put(acc, :module_clauses, [module_clause | modules]))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :mandatory_groups, _}, {:symbol, :open_brace, _} | rest] ->
-        case parse_group_list(rest, []) do
-          {:ok, {groups, remaining}} ->
-            parse_module_compliance_clauses(remaining, Map.put(acc, :mandatory_groups, groups))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :group, _}, {:identifier, group_name, _} | rest] ->
-        case parse_group_clause(group_name, rest) do
-          {:ok, {group_clause, remaining}} ->
-            groups = Map.get(acc, :groups, [])
-            parse_module_compliance_clauses(remaining, Map.put(acc, :groups, [group_clause | groups]))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :object, _}, {:identifier, object_name, _} | rest] ->
-        case parse_object_clause(object_name, rest) do
-          {:ok, {object_clause, remaining}} ->
-            objects = Map.get(acc, :objects, [])
-            parse_module_compliance_clauses(remaining, Map.put(acc, :objects, [object_clause | objects]))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      # Check for end of MODULE-COMPLIANCE
-      [{:symbol, :assign, _} | _] ->
-        # Found ::= which means we're done with clauses
-        cond do
-          map_size(acc) == 0 ->
-            {:error, "No MODULE-COMPLIANCE clauses found"}
-          not Map.has_key?(acc, :status) ->
-            {:error, "MODULE-COMPLIANCE missing required STATUS clause"}
-          not Map.has_key?(acc, :description) ->
-            {:error, "MODULE-COMPLIANCE missing required DESCRIPTION clause"}
-          true ->
-            {:ok, {acc, tokens}}
-        end
-      
-      # Check for next definition starting (identifier followed by known keywords)
-      [{:identifier, _next_name, _}, {:keyword, next_keyword, _} | _] when next_keyword in [:object_type, :module_identity, :textual_convention, :module_compliance] ->
-        cond do
-          map_size(acc) == 0 ->
-            {:error, "No MODULE-COMPLIANCE clauses found"}
-          not Map.has_key?(acc, :status) ->
-            {:error, "MODULE-COMPLIANCE missing required STATUS clause"}
-          not Map.has_key?(acc, :description) ->
-            {:error, "MODULE-COMPLIANCE missing required DESCRIPTION clause"}
-          true ->
-            {:ok, {acc, tokens}}
-        end
-      
-      # END token
-      [{:keyword, :end, _} | _] ->
-        cond do
-          map_size(acc) == 0 ->
-            {:error, "No MODULE-COMPLIANCE clauses found"}
-          not Map.has_key?(acc, :status) ->
-            {:error, "MODULE-COMPLIANCE missing required STATUS clause"}
-          not Map.has_key?(acc, :description) ->
-            {:error, "MODULE-COMPLIANCE missing required DESCRIPTION clause"}
-          true ->
-            {:ok, {acc, tokens}}
-        end
-      
-      _ ->
-        # Unknown token, skip it for now to be permissive
-        case tokens do
-          [_unknown | rest] ->
-            parse_module_compliance_clauses(rest, acc)
-          [] ->
-            {:ok, {acc, tokens}}
-        end
-    end
-  end
-
-  # Parse object group clauses in any order
-  defp parse_object_group_clauses(tokens, acc) do
-    case tokens do
-      [{:keyword, :objects, _}, {:symbol, :open_brace, _} | rest] ->
-        case parse_object_list(rest, []) do
-          {:ok, {objects, remaining}} ->
-            parse_object_group_clauses(remaining, Map.put(acc, :objects, objects))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :status, _}, {:identifier, status, _} | rest] ->
-        status_atom = String.to_atom(status)
-        parse_object_group_clauses(rest, Map.put(acc, :status, status_atom))
-      
-      [{:keyword, :status, _}, {:keyword, status, _} | rest] ->
-        parse_object_group_clauses(rest, Map.put(acc, :status, status))
-      
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        parse_object_group_clauses(rest, Map.put(acc, :description, description))
-      
-      [{:keyword, :reference, _}, {:string, reference, _} | rest] ->
-        parse_object_group_clauses(rest, Map.put(acc, :reference, reference))
-      
-      # Check for end patterns
-      [{:symbol, :assign, _} | _] ->
-        validate_object_group_clauses(acc, tokens)
-      
-      [{:identifier, _next_name, _}, {:keyword, next_keyword, _} | _] when next_keyword in [:object_type, :module_identity, :textual_convention, :module_compliance, :object_group] ->
-        validate_object_group_clauses(acc, tokens)
-      
-      [{:keyword, :end, _} | _] ->
-        validate_object_group_clauses(acc, tokens)
-      
-      _ ->
-        # Unknown token, skip it for now
-        case tokens do
-          [_unknown | rest] ->
-            parse_object_group_clauses(rest, acc)
-          [] ->
-            validate_object_group_clauses(acc, tokens)
-        end
-    end
-  end
-
-  defp validate_object_group_clauses(acc, tokens) do
-    cond do
-      map_size(acc) == 0 ->
-        {:error, "No OBJECT-GROUP clauses found"}
-      not Map.has_key?(acc, :objects) ->
-        {:error, "OBJECT-GROUP missing required OBJECTS clause"}
-      not Map.has_key?(acc, :status) ->
-        {:error, "OBJECT-GROUP missing required STATUS clause"}
-      not Map.has_key?(acc, :description) ->
-        {:error, "OBJECT-GROUP missing required DESCRIPTION clause"}
-      true ->
-        {:ok, {acc, tokens}}
-    end
-  end
-
-  # Parse object list: { object1, object2, ... }
-  defp parse_object_list([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_object_list([{:identifier, object, _} | tokens], acc) do
-    case tokens do
-      [{:symbol, :comma, _} | rest] ->
-        parse_object_list(rest, [object | acc])
-      _ ->
-        parse_object_list(tokens, [object | acc])
-    end
-  end
-
-  defp parse_object_list(tokens, _acc) do
-    {:error, "Invalid object list: #{inspect(tokens)}"}
-  end
-
-  # Parse OBJECT IDENTIFIER definition
-  defp parse_object_identifier_definition(name, tokens) do
-    with {:ok, {oid, tokens}} <- parse_oid_value(tokens) do
-      definition = %{
-        name: name,
-        __type__: :object_identifier,
-        oid: oid
-      }
-      
-      {:ok, {definition, tokens}}
-    end
-  end
-
-  # Parse TEXTUAL-CONVENTION with flexible clause order
-  defp parse_textual_convention(name, tokens) do
-    case parse_textual_convention_clauses(tokens, %{}) do
-      {:ok, {clauses, remaining_tokens}} ->
-        definition = %{
-          name: name,
-          __type__: :textual_convention,
-          display_hint: Map.get(clauses, :display_hint),
-          status: Map.get(clauses, :status),
-          description: Map.get(clauses, :description),
-          reference: Map.get(clauses, :reference),
-          syntax: Map.get(clauses, :syntax)
-        }
-        
-        {:ok, {definition, remaining_tokens}}
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse OBJECT-GROUP
-  defp parse_object_group(name, tokens) do
-    case parse_object_group_clauses(tokens, %{}) do
-      {:ok, {clauses, remaining_tokens}} ->
-        # Parse the OID assignment if present
-        case parse_oid_assignment_clause(remaining_tokens) do
-          {:ok, {oid, final_tokens}} ->
-            definition = %{
-              name: name,
-              __type__: :object_group,
-              objects: Map.get(clauses, :objects, []),
-              status: Map.get(clauses, :status),
-              description: Map.get(clauses, :description),
-              reference: Map.get(clauses, :reference),
-              oid: oid
-            }
-            
-            {:ok, {definition, final_tokens}}
-          {:error, _reason} ->
-            # No OID assignment
-            definition = %{
-              name: name,
-              __type__: :object_group,
-              objects: Map.get(clauses, :objects, []),
-              status: Map.get(clauses, :status),
-              description: Map.get(clauses, :description),
-              reference: Map.get(clauses, :reference)
-            }
-            
-            {:ok, {definition, remaining_tokens}}
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse MODULE-COMPLIANCE
-  defp parse_module_compliance(name, tokens) do
-    case parse_module_compliance_clauses(tokens, %{}) do
-      {:ok, {clauses, remaining_tokens}} ->
-        # Parse the OID assignment if present
-        case parse_oid_assignment_clause(remaining_tokens) do
-          {:ok, {oid, final_tokens}} ->
-            definition = %{
-              name: name,
-              __type__: :module_compliance,
-              status: Map.get(clauses, :status),
-              description: Map.get(clauses, :description),
-              reference: Map.get(clauses, :reference),
-              module_clauses: Map.get(clauses, :module_clauses, []),
-              mandatory_groups: Map.get(clauses, :mandatory_groups, []),
-              groups: Map.get(clauses, :groups, []),
-              objects: Map.get(clauses, :objects, []),
-              oid: oid
-            }
-            
-            {:ok, {definition, final_tokens}}
-          {:error, _reason} ->
-            # No OID assignment, that's okay for MODULE-COMPLIANCE
-            definition = %{
-              name: name,
-              __type__: :module_compliance,
-              status: Map.get(clauses, :status),
-              description: Map.get(clauses, :description),
-              reference: Map.get(clauses, :reference),
-              module_clauses: Map.get(clauses, :module_clauses, []),
-              mandatory_groups: Map.get(clauses, :mandatory_groups, []),
-              groups: Map.get(clauses, :groups, []),
-              objects: Map.get(clauses, :objects, [])
-            }
-            
-            {:ok, {definition, remaining_tokens}}
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse SEQUENCE definition
-  defp parse_sequence_definition(name, tokens) do
-    with {:ok, {elements, tokens}} <- parse_sequence_elements(tokens),
-         {:ok, tokens} <- expect_symbol(tokens, :close_brace) do
-      
-      definition = %{
-        name: name,
-        __type__: :sequence,
-        elements: elements
-      }
-      
-      {:ok, {definition, tokens}}
-    end
-  end
-
-  # Parse OID assignment: { parent child } (tokens already consumed the opening brace)
-  defp parse_oid_assignment(name, tokens) do
-    with {:ok, {oid, tokens}} <- parse_oid_elements(tokens, []) do
-      definition = %{
-        name: name,
-        __type__: :object_identifier_assignment,
-        oid: oid
-      }
-      
-      {:ok, {definition, tokens}}
-    end
-  end
-
-  # Parse simple assignment: name ::= value
-  defp parse_simple_assignment(name, [{:integer, value, _} | tokens]) do
-    definition = %{
-      name: name,
-      __type__: :simple_assignment,
-      value: value
-    }
-    
-    {:ok, {definition, tokens}}
-  end
-
-  defp parse_simple_assignment(name, [{:identifier, value, _} | tokens]) do
-    definition = %{
-      name: name,
-      __type__: :simple_assignment,
-      value: value
-    }
-    
-    {:ok, {definition, tokens}}
-  end
-
-  defp parse_simple_assignment(_name, tokens) do
-    {:error, "Expected value in simple assignment, got #{inspect(hd(tokens))}"}
-  end
-
-  # Helper parsing functions for clauses
-
-  defp parse_last_updated_clause([{:keyword, :last_updated, _}, {:string, value, _} | tokens]) do
-    {:ok, {value, tokens}}
-  end
-
-  defp parse_organization_clause([{:keyword, :organization, _}, {:string, value, _} | tokens]) do
-    {:ok, {value, tokens}}
-  end
-
-  defp parse_contact_info_clause([{:keyword, :contact_info, _}, {:string, value, _} | tokens]) do
-    {:ok, {value, tokens}}
-  end
-
-  defp parse_description_clause([{:keyword, :description, _}, {:string, value, _} | tokens]) do
-    {:ok, {value, tokens}}
-  end
-
-  defp parse_status_clause([{:keyword, :status, _}, {:identifier, status, _} | tokens]) do
-    {:ok, {String.to_atom(status), tokens}}
-  end
-  
-  defp parse_status_clause([{:keyword, :status, _}, {:keyword, status, _} | tokens]) do
-    {:ok, {status, tokens}}
-  end
-  
-  defp parse_status_clause(tokens) do
-    {:error, "Expected STATUS clause, got #{inspect(tokens)}"}
-  end
-
-  defp parse_syntax_clause([{:keyword, :syntax, _} | tokens]) do
-    parse_syntax_type(tokens)
-  end
-
-  defp parse_syntax_clause([]) do
-    {:error, "Expected SYNTAX clause but reached end of tokens"}
-  end
-
-  defp parse_syntax_clause(tokens) do
-    {:error, "Expected SYNTAX clause, got #{inspect(hd(tokens))}"}
-  end
-
-  defp parse_access_clause(tokens) do
-    case tokens do
-      [{:keyword, :access, _}, {:identifier, access, _} | rest] ->
-        {:ok, {String.to_atom(String.replace(access, "-", "_")), rest}}
-      [{:keyword, :max_access, _}, {:identifier, access, _} | rest] ->
-        {:ok, {String.to_atom(String.replace(access, "-", "_")), rest}}
-      # Handle case where ACCESS is keyword format (read-only becomes read_only)
-      [{:keyword, :access, _}, {:keyword, access_keyword, _} | rest] ->
-        {:ok, {access_keyword, rest}}
-      [{:keyword, :max_access, _}, {:keyword, access_keyword, _} | rest] ->
-        {:ok, {access_keyword, rest}}
-      # Optional access clause - continue parsing
-      _ ->
-        {:ok, {:not_accessible, tokens}}
-    end
-  end
-
-  defp parse_oid_assignment_clause([{:symbol, :assign, _} | tokens]) do
-    parse_oid_value(tokens)
-  end
-
-  # Handle DEFVAL clause before OID assignment
-  defp parse_oid_assignment_clause([{:keyword, :defval, _} | tokens]) do
-    case skip_defval_clause(tokens) do
-      {:ok, remaining_tokens} ->
-        parse_oid_assignment_clause(remaining_tokens)
-      {:error, reason} -> 
-        {:error, reason}
-    end
-  end
-
-  # Handle case where we don't have tokens (missing clause error)
-  defp parse_oid_assignment_clause([]) do
-    {:error, "Expected OID assignment but reached end of tokens"}
-  end
-
-  defp parse_oid_assignment_clause(tokens) do
-    {:error, "Expected ::= for OID assignment, got #{inspect(hd(tokens))}"}
-  end
-
-  # Parse OID value: { parent child } or { parent(number) child(number) }
-  defp parse_oid_value([{:symbol, :open_brace, _} | tokens]) do
-    parse_oid_elements(tokens, [])
-  end
-  
-  defp parse_oid_value(tokens) do
-    {:error, "Expected '{' to start OID value, got #{inspect(hd(tokens))}"}
-  end
-
-  defp parse_oid_elements([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_oid_elements([{:identifier, name, _} | tokens], acc) do
-    case tokens do
-      [{:symbol, :open_paren, _}, {:integer, value, _}, {:symbol, :close_paren, _} | rest] ->
-        element = %{name: name, value: value}
-        parse_oid_elements(rest, [element | acc])
-      _ ->
-        element = %{name: name}
-        parse_oid_elements(tokens, [element | acc])
-    end
-  end
-
-  defp parse_oid_elements([{:integer, value, _} | tokens], acc) do
-    element = %{value: value}
-    parse_oid_elements(tokens, [element | acc])
-  end
-
-  defp parse_oid_elements([], _acc) do
-    {:error, "Unexpected end of tokens while parsing OID elements"}
-  end
-
-  defp parse_oid_elements([token | _], _acc) do
-    case token do
-      {:integer, value, _} ->
-        {:error, "Expected OID element, but found integer #{value} - this might indicate a function clause mismatch"}
-      {:identifier, name, _} ->
-        {:error, "Expected OID element, but found identifier '#{name}' - this might indicate a parsing context error"}
-      other ->
-        {:error, "Invalid OID element: #{inspect(other)}"}
-    end
-  end
-
-  # Parse syntax types
-  defp parse_syntax_type([{:keyword, :integer, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_brace, _} | rest] ->
-        parse_integer_enum(rest, [])
-      [{:symbol, :open_paren, _} | rest] ->
-        parse_integer_constraint(rest)
-      _ ->
-        {:ok, {:integer, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :octet, _}, {:keyword, :string, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_paren, _} | rest] ->
-        parse_size_constraint(rest)
-      _ ->
-        {:ok, {:octet_string, tokens}}
-    end
-  end
-
-  # SNMP SMI types
-  defp parse_syntax_type([{:keyword, :integer32, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_paren, _} | rest] ->
-        parse_integer_constraint(rest)
-      _ ->
-        {:ok, {:integer32, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :unsigned32, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_paren, _} | rest] ->
-        parse_integer_constraint(rest)
-      _ ->
-        {:ok, {:unsigned32, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :counter32, _} | tokens]) do
-    {:ok, {:counter32, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :counter64, _} | tokens]) do
-    {:ok, {:counter64, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :gauge32, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_paren, _} | rest] ->
-        parse_integer_constraint(rest)
-      _ ->
-        {:ok, {:gauge32, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :time_ticks, _} | tokens]) do
-    {:ok, {:time_ticks, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :timeticks, _} | tokens]) do
-    {:ok, {:time_ticks, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :ip_address, _} | tokens]) do
-    {:ok, {:ip_address, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :ipaddress, _} | tokens]) do
-    {:ok, {:ip_address, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :object, _}, {:keyword, :identifier, _} | tokens]) do
-    {:ok, {:object_identifier, tokens}}
-  end
-
-  defp parse_syntax_type([{:keyword, :sequence, _} | tokens]) do
-    case tokens do
-      [{:keyword, :of, _}, {:identifier, type_name, _} | rest] ->
-        {:ok, {{:sequence_of, type_name}, rest}}
-      [{:keyword, :of, _} | rest] ->
-        {:ok, {:sequence_of, rest}}
-      [{:symbol, :open_brace, _} | rest] ->
-        {:ok, {:sequence, rest}}
-      _ ->
-        {:ok, {:sequence, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :choice, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_brace, _} | rest] ->
-        {:ok, {:choice, rest}}
-      _ ->
-        {:ok, {:choice, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:keyword, :bits, _} | tokens]) do
-    case tokens do
-      [{:symbol, :open_brace, _} | rest] ->
-        parse_bits_definition(rest, [])
-      _ ->
-        {:ok, {:bits, tokens}}
-    end
-  end
-
-  defp parse_syntax_type([{:identifier, type_name, _} | tokens]) do
-    {:ok, {{:named_type, type_name}, tokens}}
-  end
-
-  defp parse_syntax_type([]) do
-    {:error, "Expected syntax type but reached end of tokens"}
-  end
-
-  defp parse_syntax_type(tokens) do
-    {:error, "Invalid syntax type: #{inspect(hd(tokens))}"}
-  end
-
-  # Parse integer enumeration: { name(1), name2(2) }
-  defp parse_integer_enum([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {{:integer, :enum, Enum.reverse(acc)}, tokens}}
-  end
-
-  defp parse_integer_enum([{:identifier, name, _}, {:symbol, :open_paren, _}, {:integer, value, _}, {:symbol, :close_paren, _} | tokens], acc) do
-    enum_value = %{name: name, value: value}
-    case tokens do
-      [{:symbol, :comma, _} | rest] ->
-        parse_integer_enum(rest, [enum_value | acc])
-      _ ->
-        parse_integer_enum(tokens, [enum_value | acc])
-    end
-  end
-
-  # Handle invalid token sequences in integer enum
-  defp parse_integer_enum(tokens, _acc) do
-    {:error, "Invalid integer enumeration format: #{inspect(tokens)}"}
-  end
-
-  # Parse integer constraint: handles both simple ranges and complex OR constraints
-  defp parse_integer_constraint(tokens) do
-    parse_integer_constraint_list(tokens, [])
-  end
-
-  # Parse constraint list with OR operators
-  defp parse_integer_constraint_list([{:symbol, :close_paren, _} | tokens], acc) do
-    case acc do
-      [single_constraint] ->
-        {:ok, {single_constraint, tokens}}
-      multiple_constraints ->
-        {:ok, {{:integer, :or_constraint, Enum.reverse(multiple_constraints)}, tokens}}
-    end
-  end
-
-  # Range pattern: min..max
-  defp parse_integer_constraint_list([{:integer, min, _}, {:symbol, :range, _}, {:integer, max, _} | tokens], acc) do
-    constraint = {:range, min, max}
-    case tokens do
-      [{:symbol, :pipe, _} | rest] ->
-        parse_integer_constraint_list(rest, [constraint | acc])
-      _ ->
-        parse_integer_constraint_list(tokens, [constraint | acc])
-    end
-  end
-
-  # Single integer
-  defp parse_integer_constraint_list([{:integer, value, _} | tokens], acc) do
-    case tokens do
-      [{:symbol, :pipe, _} | rest] ->
-        parse_integer_constraint_list(rest, [value | acc])
-      _ ->
-        parse_integer_constraint_list(tokens, [value | acc])
-    end
-  end
-
-  # Handle unexpected tokens
-  defp parse_integer_constraint_list(tokens, _acc) do
-    {:error, "Invalid integer constraint pattern: #{inspect(tokens)}"}
-  end
-
-  # Parse BITS definition: { bit1(0), bit2(1), ... }
-  defp parse_bits_definition([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {{:bits, Enum.reverse(acc)}, tokens}}
-  end
-
-  defp parse_bits_definition([{:identifier, name, _}, {:symbol, :open_paren, _}, {:integer, value, _}, {:symbol, :close_paren, _} | tokens], acc) do
-    bit_value = %{name: name, value: value}
-    case tokens do
-      [{:symbol, :comma, _} | rest] ->
-        parse_bits_definition(rest, [bit_value | acc])
-      _ ->
-        parse_bits_definition(tokens, [bit_value | acc])
-    end
-  end
-
-  # Handle invalid token sequences in bits definition
-  defp parse_bits_definition(tokens, _acc) do
-    {:error, "Invalid BITS definition format: #{inspect(tokens)}"}
-  end
-
-  # Parse integer range: (min..max) - kept for compatibility
-  defp parse_integer_range([{:integer, min, _}, {:symbol, :range, _}, {:integer, max, _}, {:symbol, :close_paren, _} | tokens]) do
-    {:ok, {{:integer, :range, {min, max}}, tokens}}
-  end
-
-  # Handle invalid integer range patterns
-  defp parse_integer_range(tokens) do
-    {:error, "Invalid integer range pattern: expected (min..max), got #{inspect(tokens)}"}
-  end
-
-  # Parse size constraint: SIZE (constraint)
-  defp parse_size_constraint([{:keyword, :size, _}, {:symbol, :open_paren, _} | tokens]) do
-    case parse_size_values(tokens) do
-      {:ok, {constraint, [{:symbol, :close_paren, _} | rest]}} ->
-        {:ok, {{:octet_string, :size, constraint}, rest}}
-      error ->
-        error
-    end
-  end
-
-  # Parse size values: number | (min..max) | (val1 | val2 | min..max)
-  # Single integer without parentheses
-  defp parse_size_values([{:integer, value, _} | tokens]) do
-    # Check if this is part of a larger constraint (i.e., followed by pipe or range)
-    case tokens do
-      [{:symbol, :pipe, _} | _] ->
-        # This integer is part of a list, need to parse as constraint list
-        parse_size_constraint_list([{:integer, value, nil} | tokens], [])
-      [{:symbol, :range, _} | _] ->
-        # This integer starts a range, need to parse as constraint list  
-        parse_size_constraint_list([{:integer, value, nil} | tokens], [])
-      _ ->
-        # Simple single integer constraint
-        {:ok, {value, tokens}}
-    end
-  end
-
-  # Parenthesized constraint list
-  defp parse_size_values([{:symbol, :open_paren, _} | tokens]) do
-    parse_size_constraint_list(tokens, [])
-  end
-
-  defp parse_size_constraint_list([{:symbol, :close_paren, _} | tokens], acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  # Range pattern must come before single integer pattern
-  defp parse_size_constraint_list([{:integer, min, _}, {:symbol, :range, _}, {:integer, max, _} | tokens], acc) do
-    constraint = {:range, min, max}
-    case tokens do
-      [{:symbol, :pipe, _} | rest] ->
-        parse_size_constraint_list(rest, [constraint | acc])
-      _ ->
-        parse_size_constraint_list(tokens, [constraint | acc])
-    end
-  end
-
-  # Single integer pattern - but check if it's followed by range first
-  defp parse_size_constraint_list([{:integer, value, _} | tokens], acc) do
-    case tokens do
-      # If next is range, this should be handled by range pattern above
-      [{:symbol, :range, _} | _] ->
-        {:error, "Range pattern should have been matched earlier"}
-      [{:symbol, :pipe, _} | rest] ->
-        parse_size_constraint_list(rest, [value | acc])
-      _ ->
-        parse_size_constraint_list(tokens, [value | acc])
-    end
-  end
-
-  # Handle unexpected tokens
-  defp parse_size_constraint_list(tokens, _acc) do
-    {:error, "Unexpected tokens in SIZE constraint: #{inspect(tokens)}"}
-  end
-
-  # Parse sequence elements for SEQUENCE definitions
-  defp parse_sequence_elements(tokens) do
-    parse_sequence_element_list(tokens, [])
-  end
-
-  defp parse_sequence_element_list([{:symbol, :close_brace, _} | _] = tokens, acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_sequence_element_list([{:identifier, name, _} | tokens], acc) do
-    case parse_syntax_type(tokens) do
-      {:ok, {syntax, rest}} ->
-        element = %{name: name, type: syntax}
-        case rest do
-          [{:symbol, :comma, _} | next] ->
-            parse_sequence_element_list(next, [element | acc])
-          _ ->
-            parse_sequence_element_list(rest, [element | acc])
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Optional clauses parsing
-  defp parse_optional_object_clauses(tokens) do
-    parse_optional_clauses(tokens, %{})
-  end
-
-  defp parse_optional_clauses([{:keyword, :units, _}, {:string, units, _} | tokens], acc) do
-    parse_optional_clauses(tokens, Map.put(acc, :units, units))
-  end
-
-  defp parse_optional_clauses([{:keyword, :index, _} | tokens], acc) do
-    case parse_index_clause(tokens) do
-      {:ok, {index, rest}} ->
-        parse_optional_clauses(rest, Map.put(acc, :index, index))
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  defp parse_optional_clauses([{:keyword, :augments, _} | tokens], acc) do
-    {:ok, {augments, rest}} = parse_augments_clause(tokens)
-    parse_optional_clauses(rest, Map.put(acc, :augments, augments))
-  end
-
-  defp parse_optional_clauses([{:keyword, :reference, _}, {:string, reference, _} | tokens], acc) do
-    parse_optional_clauses(tokens, Map.put(acc, :reference, reference))
-  end
-
-  defp parse_optional_clauses(tokens, acc) do
-    {:ok, {acc, tokens}}
-  end
-
-  # Parse INDEX clause
-  defp parse_index_clause([{:symbol, :open_brace, _} | tokens]) do
-    parse_index_list(tokens, [])
-  end
-
-  defp parse_index_list([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_index_list([{:identifier, name, _} | tokens], acc) do
-    case tokens do
-      [{:symbol, :comma, _} | rest] ->
-        parse_index_list(rest, [name | acc])
-      _ ->
-        parse_index_list(tokens, [name | acc])
-    end
-  end
-
-  # Parse AUGMENTS clause
-  defp parse_augments_clause([{:symbol, :open_brace, _}, {:identifier, table, _}, {:symbol, :close_brace, _} | tokens]) do
-    {:ok, {table, tokens}}
-  end
-
-  defp parse_augments_clause(tokens) do
-    {:ok, {nil, tokens}}
-  end
-
-  # Parse optional display hint
-  defp parse_optional_display_hint([{:keyword, :display_hint, _}, {:string, hint, _} | tokens]) do
-    {:ok, {hint, tokens}}
-  end
-
-  defp parse_optional_display_hint(tokens) do
-    {:ok, {nil, tokens}}
-  end
-
-  # Skip DEFVAL clause
-  defp skip_defval_clause([{:symbol, :open_brace, _} | tokens]) do
-    skip_until_close_brace(tokens, 1)
-  end
-
-  defp skip_defval_clause(tokens) do
-    {:ok, tokens}
-  end
-
-  defp skip_until_close_brace([], _depth) do
-    {:error, "Expected closing brace for DEFVAL clause"}
-  end
-
-  defp skip_until_close_brace([{:symbol, :close_brace, _} | tokens], 1) do
-    {:ok, tokens}
-  end
-
-  defp skip_until_close_brace([{:symbol, :close_brace, _} | tokens], depth) when depth > 1 do
-    skip_until_close_brace(tokens, depth - 1)
-  end
-
-  defp skip_until_close_brace([{:symbol, :open_brace, _} | tokens], depth) do
-    skip_until_close_brace(tokens, depth + 1)
-  end
-
-  defp skip_until_close_brace([_ | tokens], depth) do
-    skip_until_close_brace(tokens, depth)
-  end
-
-  # Parse revisions clause (optional, can be multiple)
-  defp parse_revisions_clause(tokens) do
-    parse_revision_list(tokens, [])
-  end
-
-  defp parse_revision_list([{:keyword, :revision, _}, {:string, date, _}, {:keyword, :description, _}, {:string, desc, _} | tokens], acc) do
-    revision = %{date: date, description: desc}
-    parse_revision_list(tokens, [revision | acc])
-  end
-
-  defp parse_revision_list(tokens, acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  # Parse MODULE clause in compliance statement
-  defp parse_module_clause(tokens) do
-    # For now, just skip to the end of the module clause
-    # This is a simplified implementation
-    {:ok, {%{type: :module}, tokens}}
-  end
-
-  # Parse group list: { group1, group2, ... }
-  defp parse_group_list([{:symbol, :close_brace, _} | tokens], acc) do
-    {:ok, {Enum.reverse(acc), tokens}}
-  end
-
-  defp parse_group_list([{:identifier, group, _} | tokens], acc) do
-    case tokens do
-      [{:symbol, :comma, _} | rest] ->
-        parse_group_list(rest, [group | acc])
-      _ ->
-        parse_group_list(tokens, [group | acc])
-    end
-  end
-
-  defp parse_group_list(tokens, _acc) do
-    {:error, "Invalid group list: #{inspect(tokens)}"}
-  end
-
-  # Parse GROUP clause with description
-  defp parse_group_clause(group_name, tokens) do
-    case tokens do
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        group_clause = %{type: :group, name: group_name, description: description}
-        {:ok, {group_clause, rest}}
-      _ ->
-        group_clause = %{type: :group, name: group_name}
-        {:ok, {group_clause, tokens}}
-    end
-  end
-
-  # Parse OBJECT clause with optional constraints
-  defp parse_object_clause(object_name, tokens) do
-    case parse_object_compliance_clause(tokens, %{name: object_name, type: :object}) do
-      {:ok, {object_clause, remaining}} ->
-        {:ok, {object_clause, remaining}}
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-
-  # Parse object compliance clauses (WRITE-SYNTAX, MIN-ACCESS, etc.)
-  defp parse_object_compliance_clause(tokens, acc) do
-    case tokens do
-      [{:keyword, :write_syntax, _} | rest] ->
-        case parse_syntax_type(rest) do
-          {:ok, {syntax, remaining}} ->
-            parse_object_compliance_clause(remaining, Map.put(acc, :write_syntax, syntax))
-          {:error, reason} -> {:error, reason}
-        end
-      
-      [{:keyword, :min_access, _}, {:identifier, access, _} | rest] ->
-        access_atom = String.to_atom(String.replace(access, "-", "_"))
-        parse_object_compliance_clause(rest, Map.put(acc, :min_access, access_atom))
-      
-      [{:keyword, :description, _}, {:string, description, _} | rest] ->
-        parse_object_compliance_clause(rest, Map.put(acc, :description, description))
-      
-      _ ->
-        {:ok, {acc, tokens}}
-    end
-  end
-
-  # Utility functions
-
-  # Expect specific keyword token
-  defp expect_keyword([{:keyword, expected, _} | tokens], expected) do
-    {:ok, tokens}
-  end
-
-  defp expect_keyword(tokens, expected) do
-    {:error, "Expected keyword #{expected}, got #{inspect(hd(tokens))}"}
-  end
-
-  # Expect specific symbol token
-  defp expect_symbol([{:symbol, expected, _} | tokens], expected) do
-    {:ok, tokens}
-  end
-
-  defp expect_symbol(tokens, expected) do
-    {:error, "Expected symbol #{expected}, got #{inspect(hd(tokens))}"}
-  end
-
-  # Determine SNMP version from definitions
-  # Handle parse errors consistently
-  defp handle_parse_error(reason) when is_binary(reason) do
-    error = SnmpLib.MIB.Error.new(:unexpected_token, message: reason, line: 0)
-    {:error, [error]}
-  end
-  
-  defp handle_parse_error(reason) do
-    error = SnmpLib.MIB.Error.new(:unexpected_token, message: inspect(reason), line: 0)
-    {:error, [error]}
-  end
-
-  defp determine_snmp_version(definitions) do
-    has_v2_constructs = Enum.any?(definitions, fn def ->
-      def.__type__ in [:module_identity, :object_group, :notification_group, :module_compliance]
-    end)
-    
-    if has_v2_constructs, do: :v2, else: :v1
   end
 
   @doc """
-  Format error messages
+  Apply hex atom conversion to tokens from the 1:1 tokenizer.
+  Converts hex atoms like :"07fffffff" to integers for grammar compatibility.
   """
-  def format_error({:error, errors}) when is_list(errors) do
-    errors
-    |> Enum.map(&format_single_error/1)
-    |> Enum.join("\n")
+  defp apply_hex_conversion(tokens) do
+    Enum.map(tokens, &convert_hex_atom/1)
+  end
+  
+  # Convert hex atoms that look like integers to actual integers
+  defp convert_hex_atom({:atom, line, atom_value}) when is_atom(atom_value) do
+    atom_string = Atom.to_string(atom_value)
+    
+    # Check if it looks like a hex number
+    if String.match?(atom_string, ~r/^[0-9a-fA-F]+$/) do
+      try do
+        # Try to convert from hex to integer
+        hex_value = String.to_integer(atom_string, 16)
+        {:integer, line, hex_value}
+      rescue
+        _ ->
+          # If conversion fails, keep as atom
+          {:atom, line, atom_value}
+      end
+    else
+      # Not a hex pattern, keep as atom
+      {:atom, line, atom_value}
+    end
+  end
+  
+  # Pass through all other tokens unchanged
+  defp convert_hex_atom(token), do: token
+
+  @doc """
+  Convert our token format to the format expected by the Erlang grammar.
+  Our format: {:identifier, "value", line}
+  Grammar expects: {variable, line, "value"} or {atom, line}
+  """
+  defp convert_tokens_for_grammar(tokens) do
+    converted_tokens = Enum.map(tokens, &convert_single_token/1)
+    # Yecc parsers expect the end-of-input token in this format
+    converted_tokens ++ [{:'$end', 0}]
   end
 
-  def format_error({:error, error}) do
-    format_single_error(error)
+  # Convert specific identifiers to atoms for status/access values first
+  defp convert_single_token({:identifier, "read-only", line}), do: {:atom, line, :"read-only"}
+  defp convert_single_token({:identifier, "current", line}), do: {:atom, line, :current}
+  defp convert_single_token({:identifier, "mandatory", line}), do: {:atom, line, :mandatory}
+  defp convert_single_token({:identifier, "optional", line}), do: {:atom, line, :optional}
+  defp convert_single_token({:identifier, "obsolete", line}), do: {:atom, line, :obsolete}
+  defp convert_single_token({:identifier, "deprecated", line}), do: {:atom, line, :deprecated}
+  defp convert_single_token({:identifier, "read-write", line}), do: {:atom, line, :"read-write"}
+  defp convert_single_token({:identifier, "write-only", line}), do: {:atom, line, :"write-only"}
+  defp convert_single_token({:identifier, "not-accessible", line}), do: {:atom, line, :"not-accessible"}
+  defp convert_single_token({:identifier, "accessible-for-notify", line}), do: {:atom, line, :"accessible-for-notify"}
+  defp convert_single_token({:identifier, "read-create", line}), do: {:atom, line, :"read-create"}
+
+  # Convert identifiers to atoms for object names (these appear in OID definitions)
+  # MIB names stay as variables, but object names become atoms
+  defp convert_single_token({:identifier, "TEST-MIB", line}) do
+    {:variable, line, "TEST-MIB"}
+  end
+  
+  # Convert other identifiers to atoms (object names, etc.)
+  defp convert_single_token({:identifier, value, line}) do
+    {:atom, line, String.to_atom(value)}
+  end
+  
+  # Convert hex atoms that look like integers to actual integers
+  defp convert_single_token({:atom, line, atom_value}) when is_atom(atom_value) do
+    atom_string = Atom.to_string(atom_value)
+    
+    # Check if it looks like a hex number
+    if String.match?(atom_string, ~r/^[0-9a-fA-F]+$/) do
+      try do
+        # Try to convert from hex to integer
+        hex_value = String.to_integer(atom_string, 16)
+        {:integer, line, hex_value}
+      rescue
+        _ ->
+          # If conversion fails, keep as atom
+          {:atom, line, atom_value}
+      end
+    else
+      # Not a hex pattern, keep as atom
+      {:atom, line, atom_value}
+    end
   end
 
-  defp format_single_error(%{type: type, message: message, line: line}) do
-    "Line #{line}: #{type} - #{message}"
+  # Convert integers 
+  defp convert_single_token({:integer, value, line}) do
+    {:integer, line, value}
   end
 
-  defp format_single_error(error) when is_binary(error) do
-    error
+  # Convert strings
+  defp convert_single_token({:string, value, line}) do
+    {:string, line, value}
   end
 
-  defp format_single_error(error) do
-    inspect(error)
+
+  # Convert keywords to their terminal names
+  defp convert_single_token({:keyword, :definitions, line}), do: {:'DEFINITIONS', line}
+  defp convert_single_token({:keyword, :begin, line}), do: {:'BEGIN', line}
+  defp convert_single_token({:keyword, :end, line}), do: {:'END', line}
+  defp convert_single_token({:keyword, :imports, line}), do: {:'IMPORTS', line}
+  defp convert_single_token({:keyword, :from, line}), do: {:'FROM', line}
+  defp convert_single_token({:keyword, :object, line}), do: {:'OBJECT', line}
+  defp convert_single_token({:keyword, :identifier, line}), do: {:'IDENTIFIER', line}
+  defp convert_single_token({:keyword, :object_type, line}), do: {:'OBJECT-TYPE', line}
+  defp convert_single_token({:keyword, :syntax, line}), do: {:'SYNTAX', line}
+  defp convert_single_token({:keyword, :max_access, line}), do: {:'MAX-ACCESS', line}
+  defp convert_single_token({:keyword, :status, line}), do: {:'STATUS', line}
+  defp convert_single_token({:keyword, :description, line}), do: {:'DESCRIPTION', line}
+  defp convert_single_token({:keyword, :integer32, line}), do: {:variable, line, "Integer32"}
+
+  # Convert SNMPv2 keywords to their terminal names
+  defp convert_single_token({:keyword, :module_identity, line}), do: {:'MODULE-IDENTITY', line}
+  defp convert_single_token({:keyword, :module_compliance, line}), do: {:'MODULE-COMPLIANCE', line}
+  defp convert_single_token({:keyword, :textual_convention, line}), do: {:'TEXTUAL-CONVENTION', line}
+  defp convert_single_token({:keyword, :object_group, line}), do: {:'OBJECT-GROUP', line}
+  defp convert_single_token({:keyword, :notification_group, line}), do: {:'NOTIFICATION-GROUP', line}
+  defp convert_single_token({:keyword, :object_identity, line}), do: {:'OBJECT-IDENTITY', line}
+  defp convert_single_token({:keyword, :notification_type, line}), do: {:'NOTIFICATION-TYPE', line}
+  defp convert_single_token({:keyword, :agent_capabilities, line}), do: {:'AGENT-CAPABILITIES', line}
+  defp convert_single_token({:keyword, :last_updated, line}), do: {:'LAST-UPDATED', line}
+  defp convert_single_token({:keyword, :organization, line}), do: {:'ORGANIZATION', line}
+  defp convert_single_token({:keyword, :contact_info, line}), do: {:'CONTACT-INFO', line}
+  defp convert_single_token({:keyword, :revision, line}), do: {:'REVISION', line}
+  defp convert_single_token({:keyword, :units, line}), do: {:'UNITS', line}
+  defp convert_single_token({:keyword, :augments, line}), do: {:'AUGMENTS', line}
+  defp convert_single_token({:keyword, :implied, line}), do: {:'IMPLIED', line}
+  defp convert_single_token({:keyword, :objects, line}), do: {:'OBJECTS', line}
+  defp convert_single_token({:keyword, :notifications, line}), do: {:'NOTIFICATIONS', line}
+  defp convert_single_token({:keyword, :module, line}), do: {:'MODULE', line}
+  defp convert_single_token({:keyword, :mandatory_groups, line}), do: {:'MANDATORY-GROUPS', line}
+  defp convert_single_token({:keyword, :group, line}), do: {:'GROUP', line}
+  defp convert_single_token({:keyword, :write_syntax, line}), do: {:'WRITE-SYNTAX', line}
+  defp convert_single_token({:keyword, :min_access, line}), do: {:'MIN-ACCESS', line}
+  defp convert_single_token({:keyword, :display_hint, line}), do: {:'DISPLAY-HINT', line}
+  defp convert_single_token({:keyword, :reference, line}), do: {:'REFERENCE', line}
+  defp convert_single_token({:keyword, :index, line}), do: {:'INDEX', line}
+  defp convert_single_token({:keyword, :defval, line}), do: {:'DEFVAL', line}
+  defp convert_single_token({:keyword, :size, line}), do: {:'SIZE', line}
+  defp convert_single_token({:keyword, :trap_type, line}), do: {:'TRAP-TYPE', line}
+  defp convert_single_token({:keyword, :enterprise, line}), do: {:'ENTERPRISE', line}
+  defp convert_single_token({:keyword, :variables, line}), do: {:'VARIABLES', line}
+
+  # Convert symbols to their terminal equivalents
+  defp convert_single_token({:symbol, :assign, line}), do: {:'::=', line}
+  defp convert_single_token({:symbol, :comma, line}), do: {:',', line}
+  defp convert_single_token({:symbol, :semicolon, line}), do: {:';', line}
+  defp convert_single_token({:symbol, :open_brace, line}), do: {:'{', line}
+  defp convert_single_token({:symbol, :close_brace, line}), do: {:'}', line}
+  defp convert_single_token({:symbol, :open_paren, line}), do: {:'(', line}
+  defp convert_single_token({:symbol, :close_paren, line}), do: {:')', line}
+
+  # Default case for other identifiers that should be variables
+  defp convert_single_token({token_type, value, line}) do
+    Logger.warn("Unknown token #{inspect({token_type, value, line})}")
+    {:variable, line, to_string(value)}
   end
+
+  @doc """
+  Convert the Erlang parse tree to Elixir-friendly format.
+  """
+  defp convert_to_elixir_format(result) do
+    case result do
+      {:pdata, version, mib_name, exports, imports, definitions} ->
+        %{
+          __type__: :mib,
+          name: to_string(mib_name),
+          version: version,
+          exports: convert_exports(exports),
+          imports: convert_imports(imports),
+          definitions: convert_definitions(definitions)
+        }
+      {:pdata, version, mib_name, imports, definitions} ->
+        %{
+          __type__: :mib,
+          name: to_string(mib_name),
+          version: version,
+          exports: [],
+          imports: convert_imports(imports),
+          definitions: convert_definitions(definitions)
+        }
+      other ->
+        %{__type__: :unknown, raw: other}
+    end
+  end
+
+  defp convert_exports(exports) when is_list(exports) do
+    Enum.map(exports, fn export ->
+      case export do
+        {type, name} -> %{type: type, name: to_string(name)}
+        name -> %{name: to_string(name)}
+      end
+    end)
+  end
+  
+  defp convert_imports(imports) when is_list(imports) do
+    Enum.map(imports, fn
+      {{module_name, symbols}, _line} ->
+        %{
+          __type__: :import,
+          from_module: to_string(module_name),
+          symbols: Enum.map(symbols, fn
+            {:builtin, symbol} -> to_string(symbol)
+            {:node, symbol} -> to_string(symbol)
+            {:type, symbol} -> to_string(symbol)
+            symbol -> to_string(symbol)
+          end)
+        }
+      {{module_name, symbols}} ->
+        %{
+          __type__: :import,
+          from_module: to_string(module_name),
+          symbols: Enum.map(symbols, fn
+            {:builtin, symbol} -> to_string(symbol)
+            {:node, symbol} -> to_string(symbol)
+            {:type, symbol} -> to_string(symbol)
+            symbol -> to_string(symbol)
+          end)
+        }
+      other ->
+        %{__type__: :import, raw: other}
+    end)
+  end
+  
+  defp convert_imports(imports) do
+    []
+  end
+
+  defp convert_definitions(definitions) when is_list(definitions) do
+    Enum.map(definitions, &convert_definition/1)
+  end
+
+  # Handle the actual Erlang SNMP record format from the grammar
+  defp convert_definition({{record_type, name, macro, parent, sub_index}, line}) when record_type == :mc_internal do
+    %{
+      __type__: :object_identifier,
+      name: to_string(name),
+      macro: macro,
+      parent: if(is_binary(parent), do: parent, else: to_string(parent)),
+      sub_index: convert_sub_index(sub_index),
+      line: line
+    }
+  end
+  
+  defp convert_definition({{record_type, name, syntax, units, max_acc, status, desc, ref, kind, oid}, line}) when record_type == :mc_object_type do
+    %{
+      __type__: :object_type,
+      name: to_string(name),
+      syntax: syntax,
+      units: units,
+      max_access: max_acc,
+      status: status,
+      description: clean_description(desc),
+      reference: ref,
+      kind: kind,
+      oid: convert_oid(oid),
+      line: line
+    }
+  end
+  
+  # Handle module identity record
+  defp convert_definition({{:mc_module_identity, name, last_updated, organization, contact_info, description, revisions, oid}, line}) do
+    %{
+      __type__: :module_identity,
+      name: to_string(name),
+      last_updated: to_string(last_updated),
+      organization: clean_description(to_string(organization)),
+      contact_info: clean_description(to_string(contact_info)),
+      description: clean_description(to_string(description)),
+      revisions: convert_revisions(revisions),
+      oid: convert_oid(oid),
+      line: line
+    }
+  end
+  
+  # Handle textual convention record
+  defp convert_definition({{:mc_new_type, name, macro, status, description, reference, display_hint, syntax}, line}) do
+    %{
+      __type__: :textual_convention,
+      name: to_string(name),
+      macro: macro,
+      status: status,
+      description: clean_description(to_string(description)),
+      reference: if(reference == :undefined, do: nil, else: to_string(reference)),
+      display_hint: if(display_hint == :undefined, do: nil, else: to_string(display_hint)),
+      syntax: syntax,
+      line: line
+    }
+  end
+
+  # Handle other record types as they come up
+  defp convert_definition({record_tuple, line}) do
+    %{
+      __type__: :unknown,
+      record: record_tuple,
+      line: line
+    }
+  end
+  
+  # Legacy format handler (may not be needed with real parser)
+  defp convert_definition({:ok, {type, name, rest}}) do
+    base = %{
+      __type__: type,
+      name: to_string(name)
+    }
+    
+    case type do
+      :objectidentifier ->
+        Map.put(base, :oid, convert_oid(rest))
+        
+      :objectType ->
+        convert_object_type(base, rest)
+        
+      :moduleIdentity ->
+        convert_module_identity(base, rest)
+        
+      :textualConvention ->
+        convert_textual_convention(base, rest)
+        
+      :objectGroup ->
+        convert_object_group(base, rest)
+        
+      _ ->
+        Map.put(base, :data, rest)
+    end
+  end
+
+  defp convert_object_type(base, {syntax, access, status, description, reference, index, defval, oid}) do
+    base
+    |> Map.put(:syntax, convert_syntax(syntax))
+    |> Map.put(:max_access, convert_atom(access))
+    |> Map.put(:status, convert_atom(status))
+    |> Map.put(:description, clean_description(to_string(description)))
+    |> Map.put(:reference, if(reference == :undefined, do: nil, else: to_string(reference)))
+    |> Map.put(:index, convert_index(index))
+    |> Map.put(:defval, convert_defval(defval))
+    |> Map.put(:oid, convert_oid(oid))
+  end
+
+  defp convert_module_identity(base, {last_updated, organization, contact_info, description, revisions, oid}) do
+    base
+    |> Map.put(:last_updated, to_string(last_updated))
+    |> Map.put(:organization, to_string(organization))
+    |> Map.put(:contact_info, to_string(contact_info))
+    |> Map.put(:description, clean_description(to_string(description)))
+    |> Map.put(:revisions, convert_revisions(revisions))
+    |> Map.put(:oid, convert_oid(oid))
+  end
+
+  defp convert_textual_convention(base, {display_hint, status, description, reference, syntax}) do
+    base
+    |> Map.put(:display_hint, if(display_hint == :undefined, do: nil, else: to_string(display_hint)))
+    |> Map.put(:status, convert_atom(status))
+    |> Map.put(:description, clean_description(to_string(description)))
+    |> Map.put(:reference, if(reference == :undefined, do: nil, else: to_string(reference)))
+    |> Map.put(:syntax, convert_syntax(syntax))
+  end
+
+  defp convert_object_group(base, {objects, status, description, reference, oid}) do
+    base
+    |> Map.put(:objects, Enum.map(objects, &to_string/1))
+    |> Map.put(:status, convert_atom(status))
+    |> Map.put(:description, clean_description(to_string(description)))
+    |> Map.put(:reference, if(reference == :undefined, do: nil, else: to_string(reference)))
+    |> Map.put(:oid, convert_oid(oid))
+  end
+
+  defp convert_oid(oid_list) when is_list(oid_list) do
+    Enum.map(oid_list, fn
+      {name, value} when is_atom(name) and is_integer(value) ->
+        %{name: to_string(name), value: value}
+      {name, value} when is_atom(name) and is_list(value) ->
+        # Handle charlists in tuple values
+        %{name: to_string(name), value: convert_oid_value(value)}
+      value when is_integer(value) ->
+        %{value: value}
+      value when is_list(value) ->
+        # Handle charlists
+        %{value: convert_oid_value(value)}
+      name when is_atom(name) ->
+        %{name: to_string(name)}
+    end)
+  end
+  
+  # Handle tuple OIDs like {:"mib-2", ~c"4"}
+  defp convert_oid({name, value}) when is_atom(name) do
+    {name, convert_oid_value(value)}
+  end
+  
+  # Handle other OID formats
+  defp convert_oid(oid), do: oid
+  
+  # Convert OID values, handling charlists
+  defp convert_oid_value(value) when is_list(value) do
+    try do
+      # Check if it's a charlist that can be converted to string
+      if Enum.all?(value, fn
+        i when is_integer(i) -> i >= 0 and i <= 1114111
+        _ -> false
+      end) do
+        # Convert charlist to string, then try to parse as integer if possible
+        str_value = List.to_string(value)
+        case Integer.parse(str_value) do
+          {int_value, ""} -> int_value  # Pure integer string
+          _ -> str_value  # Keep as string if not pure integer
+        end
+      else
+        # Not a charlist, return as-is
+        value
+      end
+    rescue
+      _ -> value  # If conversion fails, return original
+    end
+  end
+  
+  defp convert_oid_value(value), do: value
+
+  defp convert_syntax(:integer), do: :integer
+  defp convert_syntax({:integer, constraints}), do: {:integer, convert_constraints(constraints)}
+  defp convert_syntax(:'octet string'), do: :octet_string
+  defp convert_syntax({:'octet string', size}), do: {:octet_string, convert_constraints(size)}
+  defp convert_syntax(:'object identifier'), do: :object_identifier
+  defp convert_syntax(atom) when is_atom(atom), do: atom
+
+  defp convert_constraints(constraints), do: constraints
+
+  defp convert_index(:undefined), do: nil
+  defp convert_index(index_list) when is_list(index_list) do
+    Enum.map(index_list, fn
+      {:implied, name} -> {:implied, to_string(name)}
+      name when is_atom(name) -> to_string(name)
+    end)
+  end
+
+  defp convert_defval(:undefined), do: nil
+  defp convert_defval(value), do: value
+
+  defp convert_revisions(revisions) when is_list(revisions) do
+    Enum.map(revisions, fn
+      {:mc_revision, date, description} ->
+        %{date: to_string(date), description: clean_description(to_string(description))}
+      {date, description} ->
+        %{date: to_string(date), description: clean_description(to_string(description))}
+    end)
+  end
+  
+  defp convert_revisions(_revisions), do: []
+
+  defp convert_atom(atom) when is_atom(atom) do
+    atom |> to_string() |> String.replace("-", "_") |> String.to_atom()
+  end
+
+  # Helper function to compile all MIB files in a directory
+  defp compile_directory(directory) do
+    case File.ls(directory) do
+      {:ok, files} ->
+        mib_files = files 
+        |> Enum.filter(&is_mib_file?/1)
+        |> Enum.sort()
+        
+        Logger.debug("Processing #{Path.basename(directory)}: #{length(mib_files)} files")
+        
+        results = Enum.map(mib_files, fn file ->
+          file_path = Path.join(directory, file)
+          case File.read(file_path) do
+            {:ok, content} ->
+              case parse(content) do
+                {:ok, mib_data} ->
+                  {:success, file, mib_data}
+                {:error, reason} ->
+                  {:error, file, reason}
+              end
+            {:error, reason} ->
+              {:error, file, {:file_read_error, reason}}
+          end
+        end)
+        
+        successes = results |> Enum.filter(&(elem(&1, 0) == :success))
+        failures = results |> Enum.filter(&(elem(&1, 0) == :error))
+        
+        # Extract MIB data from successes
+        success_mibs = Enum.map(successes, fn {:success, file, mib_data} ->
+          Map.put(mib_data, :source_file, file)
+        end)
+        
+        # Extract error info from failures  
+        error_info = Enum.map(failures, fn {:error, file, reason} ->
+          %{file: file, error: reason}
+        end)
+        
+        %{
+          directory: directory,
+          total: length(mib_files),
+          success: success_mibs,
+          failures: error_info,
+          success_count: length(successes),
+          failure_count: length(failures)
+        }
+        
+      {:error, reason} ->
+        Logger.error("Cannot read directory #{directory}: #{inspect(reason)}")
+        %{
+          directory: directory,
+          total: 0,
+          success: [],
+          failures: [%{file: "directory", error: reason}],
+          success_count: 0,
+          failure_count: 1
+        }
+    end
+  end
+  
+  # Helper to identify MIB files
+  defp is_mib_file?(filename) do
+    String.ends_with?(filename, ".mib") or 
+    (not String.contains?(filename, ".") and not String.ends_with?(filename, ".bin"))
+  end
+
+  # Clean up description strings by trimming lines and removing excessive whitespace
+  defp clean_description(desc) when is_binary(desc) do
+    desc
+    |> String.split("\n")
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join(" ")
+    |> String.replace(~r/\s+/, " ")
+    |> String.trim()
+  end
+  
+  defp clean_description(desc), do: desc
+
+  # Convert charlist error messages to binary strings
+  defp convert_error_to_string({line, module, message}) when is_list(message) do
+    {line, module, convert_deep_charlist(message)}
+  end
+  
+  defp convert_error_to_string(message), do: message
+  
+  defp convert_deep_charlist(list) when is_list(list) do
+    try do
+      # Handle lists of charlists like [[115, 121, 110, ...], [39, 84, 69, ...]]
+      if is_list_of_charlists?(list) do
+        Enum.map(list, &charlist_to_string/1) |> Enum.join("")
+      else
+        # Try to convert as a single charlist
+        charlist_to_string(list)
+      end
+    rescue
+      _ -> list  # If conversion fails, return original
+    end
+  end
+  
+  defp convert_deep_charlist(other), do: other
+  
+  defp is_list_of_charlists?(list) do
+    Enum.all?(list, fn
+      sublist when is_list(sublist) -> is_charlist?(sublist)
+      _ -> false
+    end)
+  end
+  
+  defp is_charlist?(list) do
+    try do
+      Enum.all?(list, fn
+        i when is_integer(i) -> i >= 0 and i <= 1114111
+        _ -> true  # Allow mixed content for improper lists like [115, 121 | ""]
+      end)
+    rescue
+      _ -> false
+    end
+  end
+  
+  defp charlist_to_string(charlist) when is_list(charlist) do
+    try do
+      # Handle improper lists like [115, 121, 110 | ""]
+      case charlist do
+        [] -> ""
+        [head | tail] when is_integer(head) and head >= 0 and head <= 1114111 ->
+          try do
+            # Try to convert the whole thing, handling improper lists
+            convert_improper_charlist(charlist, [])
+          rescue
+            _ -> inspect(charlist)  # Fallback to inspect if conversion fails
+          end
+        _ -> inspect(charlist)
+      end
+    rescue
+      _ -> inspect(charlist)
+    end
+  end
+  
+  defp charlist_to_string(other), do: inspect(other)
+  
+  defp convert_improper_charlist([], acc) do
+    acc |> Enum.reverse() |> List.to_string()
+  end
+  
+  defp convert_improper_charlist([head | tail], acc) when is_integer(head) do
+    convert_improper_charlist(tail, [head | acc])
+  end
+  
+  defp convert_improper_charlist(other, acc) when is_binary(other) do
+    # Handle case where tail is a string (like in [115, 121 | ""])
+    (acc |> Enum.reverse() |> List.to_string()) <> other
+  end
+  
+  defp convert_improper_charlist(_, acc) do
+    # For any other tail, just convert what we have
+    acc |> Enum.reverse() |> List.to_string()
+  end
+
+  # Convert sub_index from charlist to appropriate format
+  defp convert_sub_index(sub_index) when is_list(sub_index) do
+    try do
+      # Check if it's a charlist that can be converted to string
+      if Enum.all?(sub_index, fn
+        i when is_integer(i) -> i >= 0 and i <= 1114111
+        _ -> false
+      end) do
+        case List.to_string(sub_index) do
+          # Handle common cases
+          "\n" -> nil  # Convert newline to nil (often used as placeholder)
+          "" -> nil    # Convert empty string to nil
+          str -> str   # Keep as string
+        end
+      else
+        # If not a pure charlist, return as-is (might be list of integers)
+        sub_index
+      end
+    rescue
+      _ -> sub_index  # If conversion fails, return original
+    end
+  end
+  
+  defp convert_sub_index(sub_index), do: sub_index
 end

@@ -442,9 +442,9 @@ variables -> variables ',' objectname : ['$3' | '$1'].
 
 implies -> '::=' : '$1'.
 implies -> ':' ':' '=' : '$1'.
-descriptionfield -> string : lreverse(descriptionfield, val('$1')).
+descriptionfield -> string : val('$1').
 descriptionfield -> '$empty' : undefined.
-description -> 'DESCRIPTION' string : lreverse(description, val('$2')).
+description -> 'DESCRIPTION' string : val('$2').
 description -> '$empty' : undefined.
 
 displaypart -> 'DISPLAY-HINT' string : display_hint('$2') .
@@ -479,7 +479,7 @@ defvalpart -> 'DEFVAL' '{' quote variable '}' :
 			      lreverse(defvalpart_quote_variable, val('$3')),
 			      val('$4'))}.
 defvalpart -> 'DEFVAL' '{' string '}' : 
-	      {defval, lreverse(defvalpart_string, val('$3'))}.
+	      {defval, val('$3')}.
 defvalpart -> '$empty' : undefined.
 
 defbitsvalue -> defbitsnames : '$1'.
@@ -505,7 +505,7 @@ statusv1 -> 'optional' : optional.
 statusv1 -> 'obsolete' : obsolete.
 statusv1 -> 'deprecated' : deprecated.
 
-referpart -> 'REFERENCE' string : lreverse(referpart, val('$2')).
+referpart -> 'REFERENCE' string : val('$2').
 referpart -> '$empty' : undefined.
 
 
@@ -524,9 +524,9 @@ moduleidentity -> mibid 'MODULE-IDENTITY'
                   {MI, line_of('$2')}.
 
 mibid -> atom : val('$1').
-last_updated -> string : lreverse(last_updated, val('$1')) .
-organization -> string : lreverse(organization, val('$1')) .
-contact_info -> string : lreverse(contact_info, val('$1')) .
+last_updated -> string : val('$1') .
+organization -> string : val('$1') .
+contact_info -> string : val('$1') .
 
 revisionpart -> '$empty' : [] .
 revisionpart -> revisions : lreverse(revisionpart, '$1') .
@@ -536,8 +536,8 @@ revisions -> revisions revision : ['$2' | '$1'] .
 revision -> 'REVISION' revision_string 'DESCRIPTION' revision_desc : 
             make_revision('$2', '$4') .
 
-revision_string -> string : lreverse(revision_string, val('$1')) .
-revision_desc   -> string : lreverse(revision_desc, val('$1')) .
+revision_string -> string : val('$1') .
+revision_desc   -> string : val('$1') .
 
 definitionv2 -> objectidentifier : '$1'.
 definitionv2 -> objecttypev2 : '$1'.
@@ -594,7 +594,7 @@ agentcapabilities -> objectname 'AGENT-CAPABILITIES'
                                                   '$8', '$9', '$10'),
                      {AC, line_of('$2')}.
 
-prodrel -> string : lreverse(prodrel, val('$1')).
+prodrel -> string : val('$1').
 
 ac_status -> atom : ac_status('$1').
 
@@ -759,7 +759,7 @@ statusv1(Tok) ->
         optional -> optional;
         obsolete -> obsolete;
         deprecated -> deprecated;
-        Else -> {error, {"(statusv1) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(statusv1) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 statusv2(Tok) ->
@@ -767,14 +767,14 @@ statusv2(Tok) ->
         current -> current;
         deprecated -> deprecated;
         obsolete -> obsolete;
-        Else -> {error, {"(statusv2) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(statusv2) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 ac_status(Tok) ->
     case val(Tok) of
         current -> current;
         obsolete -> obsolete;
-        Else -> {error, {"(ac_status) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(ac_status) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 accessv1(Tok) ->
@@ -783,7 +783,7 @@ accessv1(Tok) ->
         'read-write' -> 'read-write';
         'write-only' -> 'write-only';
         'not-accessible' -> 'not-accessible';
-        Else -> {error, {"(accessv1) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(accessv1) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 accessv2(Tok) ->
@@ -793,7 +793,7 @@ accessv2(Tok) ->
         'read-only' -> 'read-only';
         'read-write' -> 'read-write';
         'read-create' -> 'read-create';
-        Else -> {error, {"(accessv2) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(accessv2) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 ac_access(Tok) ->
@@ -804,7 +804,7 @@ ac_access(Tok) ->
         'read-write' -> 'read-write';
         'read-create' -> 'read-create';
         'write-only' -> 'write-only';
-        Else -> {error, {"(ac_access) syntax error before: " ++ atom_to_list(Else), line_of(Tok)}}
+        Else -> {error, {list_to_binary("(ac_access) syntax error before: " ++ atom_to_list(Else)), line_of(Tok)}}
     end.
 
 %% ---------------------------------------------------------------------
@@ -879,7 +879,7 @@ make_range_integer(RevBitStr, b) ->
 make_range_integer(RevBitStr, 'B') ->
     list_to_integer(lists:reverse(RevBitStr), 2);
 make_range_integer(RevStr, Base) ->
-    {error, {invalid_base, Base, lists:reverse(RevStr)}}.
+    {error, {invalid_base, Base, list_to_binary(lists:reverse(RevStr))}}.
 
 make_range(XIntList) ->
     IntList = lists:flatten(XIntList),
@@ -902,7 +902,7 @@ make_defval_for_string2([], h) -> [];
 make_defval_for_string2([X16,X|HexString], h) ->
     lists:append(hex_to_bytes([X16,X]), make_defval_for_string2(HexString, h));
 make_defval_for_string2([_Odd], h) ->
-    throw({error, "odd number of bytes in hex string"});
+    throw({error, list_to_binary("odd number of bytes in hex string")});
 make_defval_for_string2(HexString, 'H') ->
     make_defval_for_string2(HexString,h);
 make_defval_for_string2(BitString, 'B') ->
@@ -918,7 +918,7 @@ bits_to_bytes([], 1, _Byte) ->
 bits_to_bytes([], 256, _Byte) ->
     [];
 bits_to_bytes([], _N, _Byte) ->
-    throw({error, "not a multiple of eight bits in bitstring"});
+    throw({error, list_to_binary("not a multiple of eight bits in bitstring")});
 bits_to_bytes(Rest, 256, Byte) ->
     [Byte | bits_to_bytes(Rest, 1, 0)];
 bits_to_bytes([$1 | T], N, Byte) ->
@@ -926,7 +926,7 @@ bits_to_bytes([$1 | T], N, Byte) ->
 bits_to_bytes([$0 | T], N, Byte) ->
     bits_to_bytes(T, N*2, Byte);
 bits_to_bytes([_BadChar | _T], _N, _Byte) ->
-    throw({error, "bad character in bit string"}).
+    throw({error, list_to_binary("bad character in bit string")}).
 
 hex_to_bytes(HexNumber) ->
     case length(HexNumber) rem 2 of
@@ -959,7 +959,7 @@ hex_to_four_bits(Hex) ->
 	Hex == $D -> 13;
 	Hex == $E -> 14;
 	Hex == $F -> 15;
-	true -> throw({error, "bad hex character"})
+	true -> throw({error, list_to_binary("bad hex character")})
     end.
 
 hex_to_byte(Hi,Lo) ->
@@ -980,16 +980,20 @@ kind(DefValPart,IndexPart) ->
 
 display_hint(Val) ->
     case val(Val) of
+        Str when is_binary(Str) ->
+            Str;
         Str when is_list(Str) ->
-            lists:reverse(Str);
+            list_to_binary(Str);
         _ ->
             throw({error, {invalid_display_hint, Val}})
     end.
 
 units(Val) ->
     case val(Val) of
+        Str when is_binary(Str) ->
+            Str;
         Str when is_list(Str) ->
-            lists:reverse(Str);
+            list_to_binary(Str);
         _ ->
             throw({error, {invalid_units, Val}})
     end.
