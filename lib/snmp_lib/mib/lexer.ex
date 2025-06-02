@@ -13,28 +13,42 @@ defmodule SnmpLib.MIB.Lexer do
   """
 
   # Complete reserved words list from Erlang snmpc_tok.erl - Extended from official source
-  @reserved_words MapSet.new([
-    "ACCESS", "AGENT-CAPABILITIES", "APPLICATION", "AUGMENTS", "BEGIN",
-    "BITS", "CHOICE", "CONTACT-INFO", "COUNTER", "COUNTER32", "COUNTER64", 
-    "DEFVAL", "DEFINITIONS", "DESCRIPTION", "DISPLAY-HINT", "END", "ENTERPRISE",
-    "EXPORTS", "FROM", "GAUGE", "GAUGE32", "GROUP", "IDENTIFIER",
-    "IMPLICIT", "IMPORTS", "INDEX", "INTEGER", "INTEGER32", "Integer32", "IpAddress",
-    "LAST-UPDATED", "MAX-ACCESS", "MIN-ACCESS", "MODULE", "MODULE-COMPLIANCE",
-    "MODULE-IDENTITY", "NOTIFICATION-GROUP", "NOTIFICATION-TYPE", "OBJECT",
-    "OBJECT-GROUP", "OBJECT-IDENTITY", "OBJECT-TYPE", "OBJECTS", "OCTET",
-    "OF", "ORGANIZATION", "REFERENCE", "REVISION", "SEQUENCE", "SIZE",
-    "STATUS", "STRING", "SYNTAX", "TEXTUAL-CONVENTION", "TimeTicks",
-    "TRAP-TYPE", "UNITS", "UNIVERSAL", "Unsigned32", "VARIABLES", "WRITE-SYNTAX",
+  # Optimized: Pre-computed keyword atoms to avoid runtime string processing
+  @reserved_words_map %{
+    "ACCESS" => :access, "AGENT-CAPABILITIES" => :agent_capabilities, "APPLICATION" => :application, 
+    "AUGMENTS" => :augments, "BEGIN" => :begin, "BITS" => :bits, "CHOICE" => :choice, 
+    "CONTACT-INFO" => :contact_info, "COUNTER" => :counter, "COUNTER32" => :counter32, 
+    "COUNTER64" => :counter64, "DEFVAL" => :defval, "DEFINITIONS" => :definitions, 
+    "DESCRIPTION" => :description, "DISPLAY-HINT" => :display_hint, "END" => :end, 
+    "ENTERPRISE" => :enterprise, "EXPORTS" => :exports, "FROM" => :from, "GAUGE" => :gauge, 
+    "GAUGE32" => :gauge32, "GROUP" => :group, "IDENTIFIER" => :identifier, "IMPLICIT" => :implicit, 
+    "IMPORTS" => :imports, "INDEX" => :index, "INTEGER" => :integer, "INTEGER32" => :integer32, 
+    "Integer32" => :integer32, "IpAddress" => :ipaddress, "LAST-UPDATED" => :last_updated, 
+    "MAX-ACCESS" => :max_access, "MIN-ACCESS" => :min_access, "MODULE" => :module, 
+    "MODULE-COMPLIANCE" => :module_compliance, "MODULE-IDENTITY" => :module_identity, 
+    "NOTIFICATION-GROUP" => :notification_group, "NOTIFICATION-TYPE" => :notification_type, 
+    "OBJECT" => :object, "OBJECT-GROUP" => :object_group, "OBJECT-IDENTITY" => :object_identity, 
+    "OBJECT-TYPE" => :object_type, "OBJECTS" => :objects, "OCTET" => :octet, "OF" => :of, 
+    "ORGANIZATION" => :organization, "REFERENCE" => :reference, "REVISION" => :revision, 
+    "SEQUENCE" => :sequence, "SIZE" => :size, "STATUS" => :status, "STRING" => :string, 
+    "SYNTAX" => :syntax, "TEXTUAL-CONVENTION" => :textual_convention, "TimeTicks" => :timeticks, 
+    "TRAP-TYPE" => :trap_type, "UNITS" => :units, "UNIVERSAL" => :universal, 
+    "Unsigned32" => :unsigned32, "VARIABLES" => :variables, "WRITE-SYNTAX" => :write_syntax,
     # Additional from complete Erlang list
-    "Counter64", "MANDATORY-GROUPS", "COMPLIANCE", "PRODUCT-RELEASE", 
-    "SUPPORTS", "INCLUDES", "VARIATION", "CREATION-REQUIRES", "AGENT-CAPABILITIES",
-    "IMPLIED", "CHOICE", "EXPLICIT", "TAGS", "BIT", "OCTET", "NULL", "BOOLEAN",
+    "Counter64" => :counter64, "MANDATORY-GROUPS" => :mandatory_groups, "COMPLIANCE" => :compliance, 
+    "PRODUCT-RELEASE" => :product_release, "SUPPORTS" => :supports, "INCLUDES" => :includes, 
+    "VARIATION" => :variation, "CREATION-REQUIRES" => :creation_requires, "IMPLIED" => :implied, 
+    "EXPLICIT" => :explicit, "TAGS" => :tags, "BIT" => :bit, "NULL" => :null, "BOOLEAN" => :boolean,
     # Extended from actual Erlang grammar - missing critical keywords
-    "MACRO", "TYPE", "VALUE", "ABSENT", "ANY", "DEFINED", "BY", "OPTIONAL",
-    "DEFAULT", "COMPONENTS", "PRIVATE", "PUBLIC", "REAL", "INCLUDES", "MIN", "MAX",
-    "EXTENSIBILITY", "IMPLIED", "WITH", "COMPONENT", "PRESENT", "EXCEPT",
-    "INTERSECTION", "UNION", "ALL", "ENCODED"
-  ])
+    "MACRO" => :macro, "TYPE" => :type, "VALUE" => :value, "ABSENT" => :absent, "ANY" => :any, 
+    "DEFINED" => :defined, "BY" => :by, "OPTIONAL" => :optional, "DEFAULT" => :default, 
+    "COMPONENTS" => :components, "PRIVATE" => :private, "PUBLIC" => :public, "REAL" => :real, 
+    "MIN" => :min, "MAX" => :max, "EXTENSIBILITY" => :extensibility, "WITH" => :with, 
+    "COMPONENT" => :component, "PRESENT" => :present, "EXCEPT" => :except, 
+    "INTERSECTION" => :intersection, "UNION" => :union, "ALL" => :all, "ENCODED" => :encoded
+  }
+  
+  @reserved_words MapSet.new(Map.keys(@reserved_words_map))
 
   @doc """
   Tokenize MIB content following Erlang snmpc_tok.erl exactly.
@@ -79,17 +93,60 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest, line + 1, acc)
   end
 
+  # Handle identifiers and keywords FIRST - most common in MIB files
+  defp do_tokenize(<<c, _::binary>> = input, line, acc) 
+      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) do
+    {name, rest} = parse_name_inline(input, <<>>)
+    token = make_name_token_binary(name, line)
+    do_tokenize(rest, line, [token | acc])
+  end
+
+  # Handle integers - inlined binary integer parsing for performance
+  defp do_tokenize(<<c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
+    {int_value, rest} = parse_integer_inline(input, 0)
+    token = {:integer, int_value, line}
+    do_tokenize(rest, line, [token | acc])
+  end
+  
+  # Inlined integer parsing - faster than function calls
+  defp parse_integer_inline(<<c, rest::binary>>, acc) when c >= ?0 and c <= ?9 do
+    parse_integer_inline(rest, acc * 10 + (c - ?0))
+  end
+  defp parse_integer_inline(rest, acc), do: {acc, rest}
+  
+  # Inlined name parsing - faster than function calls for identifiers/keywords
+  defp parse_name_inline(<<c, rest::binary>>, acc) 
+      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or 
+           (c >= ?0 and c <= ?9) or c == ?- or c == ?_ do
+    parse_name_inline(rest, <<acc::binary, c>>)
+  end
+  defp parse_name_inline(rest, acc), do: {acc, rest}
+
   # Skip comments (-- to end of line) - optimized binary matching
   defp do_tokenize(<<"--", rest::binary>>, line, acc) do
     rest_after_comment = skip_comment_binary(rest)
     do_tokenize(rest_after_comment, line, acc)
   end
 
+  # Handle negative integers
+  defp do_tokenize(<<?-, c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
+    <<?-, rest::binary>> = input
+    {int_value, rest_after_int} = parse_integer_inline(rest, 0)
+    token = {:integer, -int_value, line}
+    do_tokenize(rest_after_int, line, [token | acc])
+  end
+
+  # Handle single minus as symbol (not negative number)
+  defp do_tokenize(<<?-, rest::binary>>, line, acc) do
+    token = {:symbol, :minus, line}
+    do_tokenize(rest, line, [token | acc])
+  end
+
   # Handle string literals - optimized binary collection
   defp do_tokenize(<<?\", rest::binary>>, line, acc) do
     case collect_string_binary(rest, <<>>) do
       {string_value, rest_after_string} ->
-        token = {:string, string_value, %{line: line, column: nil}}
+        token = {:string, string_value, line}
         do_tokenize(rest_after_string, line, [token | acc])
       {:error, reason} ->
         throw({:error, reason})
@@ -100,143 +157,114 @@ defmodule SnmpLib.MIB.Lexer do
   defp do_tokenize(<<?\', rest::binary>>, line, acc) do
     case collect_quote_binary(rest, <<>>) do
       {quote_value, rest_after_quote} ->
-        token = {:quote, quote_value, %{line: line, column: nil}}
+        token = {:quote, quote_value, line}
         do_tokenize(rest_after_quote, line, [token | acc])
       {:error, reason} ->
         throw({:error, reason})
     end
   end
 
-  # Handle integers - optimized binary integer parsing
-  defp do_tokenize(<<c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
-    {int_value, rest} = parse_integer_binary(input, 0)
-    token = {:integer, int_value, %{line: line, column: nil}}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  # Handle negative integers
-  defp do_tokenize(<<?-, c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
-    <<?-, rest::binary>> = input
-    {int_value, rest_after_int} = parse_integer_binary(rest, 0)
-    token = {:integer, -int_value, %{line: line, column: nil}}
-    do_tokenize(rest_after_int, line, [token | acc])
-  end
-
-  # Handle single minus as symbol (not negative number)
-  defp do_tokenize(<<?-, rest::binary>>, line, acc) do
-    token = {:symbol, :minus, %{line: line, column: nil}}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  # Handle identifiers and keywords - optimized binary name parsing
-  defp do_tokenize(<<c, _::binary>> = input, line, acc) 
-      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) do
-    {name, rest} = parse_name_binary(input, <<>>)
-    token = make_name_token_binary(name, line)
-    do_tokenize(rest, line, [token | acc])
-  end
-
   # Handle multi-character symbols
   defp do_tokenize(<<"::=", rest::binary>>, line, acc) do
-    token = {:symbol, :assign, %{line: line, column: nil}}
+    token = {:symbol, :assign, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"..", rest::binary>>, line, acc) do
-    token = {:symbol, :range, %{line: line, column: nil}}
+    token = {:symbol, :range, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   # Handle single character symbols
   defp do_tokenize(<<"{", rest::binary>>, line, acc) do
-    token = {:symbol, :open_brace, %{line: line, column: nil}}
+    token = {:symbol, :open_brace, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"}", rest::binary>>, line, acc) do
-    token = {:symbol, :close_brace, %{line: line, column: nil}}
+    token = {:symbol, :close_brace, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"(", rest::binary>>, line, acc) do
-    token = {:symbol, :open_paren, %{line: line, column: nil}}
+    token = {:symbol, :open_paren, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<")", rest::binary>>, line, acc) do
-    token = {:symbol, :close_paren, %{line: line, column: nil}}
+    token = {:symbol, :close_paren, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"[", rest::binary>>, line, acc) do
-    token = {:symbol, :open_bracket, %{line: line, column: nil}}
+    token = {:symbol, :open_bracket, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"]", rest::binary>>, line, acc) do
-    token = {:symbol, :close_bracket, %{line: line, column: nil}}
+    token = {:symbol, :close_bracket, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<",", rest::binary>>, line, acc) do
-    token = {:symbol, :comma, %{line: line, column: nil}}
+    token = {:symbol, :comma, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<".", rest::binary>>, line, acc) do
-    token = {:symbol, :dot, %{line: line, column: nil}}
+    token = {:symbol, :dot, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<";", rest::binary>>, line, acc) do
-    token = {:symbol, :semicolon, %{line: line, column: nil}}
+    token = {:symbol, :semicolon, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"|", rest::binary>>, line, acc) do
-    token = {:symbol, :pipe, %{line: line, column: nil}}
+    token = {:symbol, :pipe, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<":", rest::binary>>, line, acc) do
-    token = {:symbol, :colon, %{line: line, column: nil}}
+    token = {:symbol, :colon, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"=", rest::binary>>, line, acc) do
-    token = {:symbol, :equals, %{line: line, column: nil}}
+    token = {:symbol, :equals, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   # Handle additional special characters that appear in SNMP MIBs
   defp do_tokenize(<<"+", rest::binary>>, line, acc) do
-    token = {:symbol, :plus, %{line: line, column: nil}}
+    token = {:symbol, :plus, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"*", rest::binary>>, line, acc) do
-    token = {:symbol, :star, %{line: line, column: nil}}
+    token = {:symbol, :star, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"/", rest::binary>>, line, acc) do
-    token = {:symbol, :slash, %{line: line, column: nil}}
+    token = {:symbol, :slash, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<"<", rest::binary>>, line, acc) do
-    token = {:symbol, :less_than, %{line: line, column: nil}}
+    token = {:symbol, :less_than, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   defp do_tokenize(<<">", rest::binary>>, line, acc) do
-    token = {:symbol, :greater_than, %{line: line, column: nil}}
+    token = {:symbol, :greater_than, line}
     do_tokenize(rest, line, [token | acc])
   end
 
   # Handle any other single character as a special symbol (safer than atom)
   defp do_tokenize(<<ch, rest::binary>>, line, acc) do
-    token = {:unknown_char, ch, %{line: line, column: nil}}
+    token = {:unknown_char, ch, line}
     do_tokenize(rest, line, [token | acc])
   end
 
@@ -276,32 +304,16 @@ defmodule SnmpLib.MIB.Lexer do
     throw({:error, "Unterminated quote"})
   end
 
-  # Parse integer value - binary optimized
-  defp parse_integer_binary(<<c, rest::binary>>, acc) when c >= ?0 and c <= ?9 do
-    parse_integer_binary(rest, acc * 10 + (c - ?0))
-  end
-  defp parse_integer_binary(rest, acc), do: {acc, rest}
 
-  # Parse identifier/keyword names - binary optimized  
-  defp parse_name_binary(<<c, rest::binary>>, acc) 
-      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or 
-           (c >= ?0 and c <= ?9) or c == ?- or c == ?_ do
-    parse_name_binary(rest, <<acc::binary, c>>)
-  end
-  defp parse_name_binary(rest, acc), do: {acc, rest}
-
-  # Create appropriate token for name - binary optimized
+  # Create appropriate token for name - binary optimized with pre-computed keywords
   defp make_name_token_binary(name, line) do
-    if reserved_word?(name) do
-      # Convert reserved word to keyword token (lowercase with underscores)
-      keyword_atom = name 
-                    |> String.replace("-", "_")
-                    |> String.downcase()
-                    |> String.to_atom()
-      {:keyword, keyword_atom, %{line: line, column: nil}}
-    else
-      # All non-keywords are identifiers in SNMP MIB parsing
-      {:identifier, name, %{line: line, column: nil}}
+    case Map.get(@reserved_words_map, name) do
+      nil ->
+        # All non-keywords are identifiers in SNMP MIB parsing
+        {:identifier, name, line}
+      keyword_atom ->
+        # Use pre-computed keyword atom (no string processing needed)
+        {:keyword, keyword_atom, line}
     end
   end
 
