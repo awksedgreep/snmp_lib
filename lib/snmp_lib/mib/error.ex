@@ -79,13 +79,17 @@ defmodule SnmpLib.MIB.Error do
   
   # Generate human-readable error messages
   defp generate_message(:unexpected_token, opts) do
-    expected = opts[:expected] |> to_string()
-    actual = opts[:actual] |> to_string()
+    expected = format_token_value(opts[:expected])
+    actual = format_token_value(opts[:actual])
     value = opts[:value]
+    message = opts[:message]
     
-    case value do
-      nil -> "Expected #{expected}, but found #{actual}"
-      val -> "Expected #{expected}, but found #{actual} '#{val}'"
+    cond do
+      message != nil -> message
+      value != nil -> "Expected #{expected}, but found #{actual} '#{value}'"
+      actual == "" or actual == "nil" -> "Expected #{expected}, but found end of input"
+      expected == "" or expected == "nil" -> "Unexpected token #{actual}"
+      true -> "Expected #{expected}, but found #{actual}"
     end
   end
   
@@ -127,6 +131,13 @@ defmodule SnmpLib.MIB.Error do
   defp generate_message(type, _opts) do
     type |> to_string() |> String.replace("_", " ") |> String.capitalize()
   end
+  
+  # Helper to format token values properly
+  defp format_token_value(nil), do: "unknown"
+  defp format_token_value(""), do: "unknown"
+  defp format_token_value(value) when is_atom(value), do: to_string(value)
+  defp format_token_value(value) when is_binary(value), do: value
+  defp format_token_value(value), do: inspect(value)
   
   # Generate helpful suggestions based on error type and context
   defp generate_suggestions(:unexpected_token, opts) do

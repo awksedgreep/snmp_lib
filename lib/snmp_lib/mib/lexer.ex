@@ -17,11 +17,11 @@ defmodule SnmpLib.MIB.Lexer do
   @reserved_words_map %{
     "ACCESS" => :access, "AGENT-CAPABILITIES" => :agent_capabilities, "APPLICATION" => :application, 
     "AUGMENTS" => :augments, "BEGIN" => :begin, "BITS" => :bits, "CHOICE" => :choice, 
-    "CONTACT-INFO" => :contact_info, "COUNTER" => :counter, "COUNTER32" => :counter32, 
-    "COUNTER64" => :counter64, "DEFVAL" => :defval, "DEFINITIONS" => :definitions, 
+    "CONTACT-INFO" => :contact_info, "COUNTER" => :counter, "COUNTER32" => :counter32, "Counter32" => :counter32,
+    "COUNTER64" => :counter64, "Counter64" => :counter64, "DEFVAL" => :defval, "DEFINITIONS" => :definitions, 
     "DESCRIPTION" => :description, "DISPLAY-HINT" => :display_hint, "END" => :end, 
     "ENTERPRISE" => :enterprise, "EXPORTS" => :exports, "FROM" => :from, "GAUGE" => :gauge, 
-    "GAUGE32" => :gauge32, "GROUP" => :group, "IDENTIFIER" => :identifier, "IMPLICIT" => :implicit, 
+    "GAUGE32" => :gauge32, "Gauge32" => :gauge32, "GROUP" => :group, "IDENTIFIER" => :identifier, "IMPLICIT" => :implicit, 
     "IMPORTS" => :imports, "INDEX" => :index, "INTEGER" => :integer, "INTEGER32" => :integer32, 
     "Integer32" => :integer32, "IpAddress" => :ipaddress, "LAST-UPDATED" => :last_updated, 
     "MAX-ACCESS" => :max_access, "MIN-ACCESS" => :min_access, "MODULE" => :module, 
@@ -35,7 +35,7 @@ defmodule SnmpLib.MIB.Lexer do
     "TRAP-TYPE" => :trap_type, "UNITS" => :units, "UNIVERSAL" => :universal, 
     "Unsigned32" => :unsigned32, "VARIABLES" => :variables, "WRITE-SYNTAX" => :write_syntax,
     # Additional from complete Erlang list
-    "Counter64" => :counter64, "MANDATORY-GROUPS" => :mandatory_groups, "COMPLIANCE" => :compliance, 
+    "MANDATORY-GROUPS" => :mandatory_groups, "COMPLIANCE" => :compliance, 
     "PRODUCT-RELEASE" => :product_release, "SUPPORTS" => :supports, "INCLUDES" => :includes, 
     "VARIATION" => :variation, "CREATION-REQUIRES" => :creation_requires, "IMPLIED" => :implied, 
     "EXPLICIT" => :explicit, "TAGS" => :tags, "BIT" => :bit, "NULL" => :null, "BOOLEAN" => :boolean,

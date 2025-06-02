@@ -8,7 +8,7 @@ defmodule SnmpLib.MIB.CompilerPort do
   Original copyright: Ericsson AB 1996-2025 (Apache License 2.0)
   """
 
-  alias SnmpLib.MIB.{Lexer, ParserPort}
+  alias SnmpLib.MIB.{Lexer, Parser}
   
   # Compilation data structure (port of Erlang #pdata record)
   defstruct [
@@ -130,7 +130,7 @@ defmodule SnmpLib.MIB.CompilerPort do
     
     case Lexer.tokenize(content) do
       {:ok, tokens} ->
-        case ParserPort.parse_tokens(tokens) do
+        case Parser.parse_tokens(tokens) do
           {:ok, mib} ->
             log_phase_success("Parsing", length(mib.definitions), verbosity)
             

@@ -1,7 +1,7 @@
 defmodule SnmpLib.DocsisMibTest do
   use ExUnit.Case
   
-  alias SnmpLib.MIB.{ParserPort, Lexer}
+  alias SnmpLib.MIB.{Parser, Lexer}
   
   @moduledoc """
   Official test suite for DOCSIS MIB compatibility.
@@ -48,9 +48,12 @@ defmodule SnmpLib.DocsisMibTest do
       end)
       
       if length(failed_mibs) > 0 do
-        error_details = Enum.map(failed_mibs, fn {name, {:error, errors}} ->
-          first_error = List.first(errors)
-          "#{name}: #{SnmpLib.MIB.Error.format(first_error)}"
+        error_details = Enum.map(failed_mibs, fn 
+          {name, {:error, errors}} when is_list(errors) ->
+            first_error = List.first(errors)
+            "#{name}: #{SnmpLib.MIB.Error.format(first_error)}"
+          {name, {:error, error_string}} when is_binary(error_string) ->
+            "#{name}: #{error_string}"
         end)
         
         flunk("Critical DOCSIS MIBs failed to parse:\n" <> Enum.join(error_details, "\n"))
@@ -182,7 +185,7 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, tokens} = Lexer.tokenize(mib_content)
-      {:ok, mib} = ParserPort.parse_tokens(tokens)
+      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       object_type = List.first(mib.definitions)
@@ -201,7 +204,7 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, tokens} = Lexer.tokenize(mib_content)
-      {:ok, mib} = ParserPort.parse_tokens(tokens)
+      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       oid_def = List.first(mib.definitions)
@@ -224,7 +227,7 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, tokens} = Lexer.tokenize(mib_content)
-      {:ok, mib} = ParserPort.parse_tokens(tokens)
+      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       textual_convention = List.first(mib.definitions)
@@ -241,7 +244,7 @@ defmodule SnmpLib.DocsisMibTest do
         {:ok, content} ->
           case Lexer.tokenize(content) do
             {:ok, tokens} ->
-              ParserPort.parse_tokens(tokens)
+              Parser.parse_tokens(tokens)
             {:error, error} ->
               {:error, [error]}
           end
@@ -257,12 +260,14 @@ defmodule SnmpLib.DocsisMibTest do
     {:ok, content} = File.read(path)
     {:ok, tokens} = Lexer.tokenize(content)
     
-    case ParserPort.parse_tokens(tokens) do
+    case Parser.parse_tokens(tokens) do
       {:ok, mib} -> {mib, []}
       {:warning, mib, warnings} -> {mib, warnings}
-      {:error, errors} -> 
+      {:error, errors} when is_list(errors) -> 
         first_error = List.first(errors)
         flunk("Expected successful parsing but got error: #{SnmpLib.MIB.Error.format(first_error)}")
+      {:error, error_string} when is_binary(error_string) ->
+        flunk("Expected successful parsing but got error: #{error_string}")
     end
   end
   
