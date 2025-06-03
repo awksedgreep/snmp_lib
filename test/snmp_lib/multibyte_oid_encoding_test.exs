@@ -27,7 +27,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, test_oid}
+        expected_string = Enum.join(test_oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Boundary value #{description} (#{value}) failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -62,7 +63,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, full_oid}
+        expected_string = Enum.join(full_oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Enterprise #{description} (#{enterprise}) failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -104,7 +106,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, test_oid}
+        expected_string = Enum.join(test_oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Multibyte pattern #{description} failed round-trip: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -131,7 +134,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, test_oid}
+        expected_string = Enum.join(test_oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Large value #{value} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -172,7 +176,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded3} = PDU.decode_message(encoded3)
         {_, _, result3} = hd(decoded3.pdu.varbinds)
         
-        expected = {:object_identifier, original_oid}
+        expected_string = Enum.join(original_oid, ".")
+        expected = {:object_identifier, expected_string}
         assert result1 == expected, "First cycle failed for value #{value}"
         assert result2 == expected, "Second cycle failed for value #{value}"  
         assert result3 == expected, "Third cycle failed for value #{value}"
@@ -198,7 +203,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, oid}
+        expected_string = Enum.join(oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Mixed OID #{inspect(oid)} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"

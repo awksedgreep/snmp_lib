@@ -15,7 +15,6 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
       ]
       
       Enum.each(string_oids, fn {oid_string, description} ->
-        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         test_value = {:object_identifier, oid_string}
         
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
@@ -26,7 +25,7 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, expected_list}
+        expected = {:object_identifier, oid_string}
         
         assert decoded_value == expected, 
           "String OID #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -43,7 +42,6 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
       ]
       
       Enum.each(string_oids, fn {oid_string, description} ->
-        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, oid_string}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
@@ -53,7 +51,7 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, expected_list}
+        expected = {:object_identifier, oid_string}
         
         assert decoded_value == expected, 
           "Explicit string OID #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -69,7 +67,7 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {"1.3.6.1.4.1.65535", [1, 3, 6, 1, 4, 1, 65535]}
       ]
       
-      Enum.each(large_enterprise_oids, fn {oid_string, expected_list} ->
+      Enum.each(large_enterprise_oids, fn {oid_string, _expected_list} ->
         test_value = {:object_identifier, oid_string}
         
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
@@ -80,7 +78,7 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, expected_list}
+        expected = {:object_identifier, oid_string}
         
         assert decoded_value == expected, 
           "Large enterprise OID #{oid_string} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -122,7 +120,6 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
       ]
       
       Enum.each(test_oids, fn oid_string ->
-        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         test_value = {:object_identifier, oid_string}
         
         # First cycle
@@ -152,7 +149,7 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded3} = PDU.decode_message(encoded3)
         {_, _, value3} = hd(decoded3.pdu.varbinds)
         
-        expected = {:object_identifier, expected_list}
+        expected = {:object_identifier, oid_string}
         assert value1 == expected, "First cycle failed for #{oid_string}"
         assert value2 == expected, "Second cycle failed for #{oid_string}" 
         assert value3 == expected, "Third cycle failed for #{oid_string}"

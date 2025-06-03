@@ -1,5 +1,8 @@
 ExUnit.start()
 
+# Set logging level to :warning during tests to reduce verbosity
+Logger.configure(level: :warning)
+
 # Configure faster timeouts for testing
 ExUnit.configure(
   timeout: 1_000,           # 1 second default timeout

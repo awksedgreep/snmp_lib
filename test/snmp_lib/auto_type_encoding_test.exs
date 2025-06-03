@@ -30,11 +30,11 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
         
-        # For object_identifier strings, the expected result is converted to list format
+        # For object_identifier lists, the expected result is converted to string format
         expected = case test_value do
-          {:object_identifier, oid_string} when is_binary(oid_string) ->
-            oid_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
-            {:object_identifier, oid_list}
+          {:object_identifier, oid_list} when is_list(oid_list) ->
+            oid_string = Enum.join(oid_list, ".")
+            {:object_identifier, oid_string}
           _ ->
             test_value
         end
@@ -122,9 +122,17 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:ok, decoded3} = PDU.decode_message(encoded3)
         {_, _, result3} = hd(decoded3.pdu.varbinds)
         
-        assert result1 == original, "First cycle failed for #{inspect(original)}"
-        assert result2 == original, "Second cycle failed for #{inspect(original)}"
-        assert result3 == original, "Third cycle failed for #{inspect(original)}"
+        # For object_identifier, convert to expected string format
+        expected_original = case original do
+          {:object_identifier, oid_list} when is_list(oid_list) ->
+            {:object_identifier, Enum.join(oid_list, ".")}
+          _ ->
+            original
+        end
+        
+        assert result1 == expected_original, "First cycle failed for #{inspect(original)}"
+        assert result2 == expected_original, "Second cycle failed for #{inspect(original)}"
+        assert result3 == expected_original, "Third cycle failed for #{inspect(original)}"
         assert result1 == result2, "Results differ between cycle 1 and 2 for #{inspect(original)}"
         assert result2 == result3, "Results differ between cycle 2 and 3 for #{inspect(original)}"
       end)
@@ -157,7 +165,7 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:counter32, 987654},
         {:gauge32, 100000000},
         {:ip_address, <<192, 168, 1, 100>>},
-        {:object_identifier, [1, 3, 6, 1, 4, 1, 8072, 3, 2, 10]},
+        {:object_identifier, "1.3.6.1.4.1.8072.3.2.10"},
         {:opaque, <<0xDE, 0xAD, 0xBE, 0xEF>>},
         {:no_such_object, nil}
       ]

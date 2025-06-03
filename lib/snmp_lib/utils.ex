@@ -374,6 +374,103 @@ defmodule SnmpLib.Utils do
   end
   def format_response_time(_), do: "Invalid time"
   
+  ## Target Parsing Functions
+
+  @doc """
+  Parses SNMP target specifications into standardized format.
+  
+  Accepts various input formats and returns a consistent target map with host and port.
+  IP addresses are resolved to tuples when possible, hostnames remain as strings.
+  Default port is 161 when not specified.
+  
+  ## Parameters
+  
+  - `target`: Target specification in various formats
+  
+  ## Accepted Input Formats
+  
+  - `"192.168.1.1:161"` - IP with port
+  - `"192.168.1.1"` - IP without port (uses default 161)
+  - `"device.local:162"` - hostname with port
+  - `"device.local"` - hostname without port (uses default 161)
+  - `{192, 168, 1, 1}` - IP tuple (uses default port 161)
+  - `%{host: "192.168.1.1", port: 161}` - already parsed map
+  
+  ## Returns
+  
+  - `{:ok, %{host: host, port: port}}` - Successfully parsed target
+  - `{:error, reason}` - Parse error with reason
+  
+  ## Examples
+  
+      iex> SnmpLib.Utils.parse_target("192.168.1.1:161")
+      {:ok, %{host: {192, 168, 1, 1}, port: 161}}
+      
+      iex> SnmpLib.Utils.parse_target("192.168.1.1")
+      {:ok, %{host: {192, 168, 1, 1}, port: 161}}
+      
+      iex> SnmpLib.Utils.parse_target("device.local:162")
+      {:ok, %{host: "device.local", port: 162}}
+      
+      iex> SnmpLib.Utils.parse_target("device.local")
+      {:ok, %{host: "device.local", port: 161}}
+      
+      iex> SnmpLib.Utils.parse_target({192, 168, 1, 1})
+      {:ok, %{host: {192, 168, 1, 1}, port: 161}}
+      
+      iex> SnmpLib.Utils.parse_target(%{host: "192.168.1.1", port: 161})
+      {:ok, %{host: {192, 168, 1, 1}, port: 161}}
+      
+      iex> SnmpLib.Utils.parse_target("invalid:99999")
+      {:error, {:invalid_port, "99999"}}
+  """
+  @spec parse_target(String.t() | tuple() | map()) :: {:ok, %{host: :inet.ip_address() | String.t(), port: pos_integer()}} | {:error, any()}
+  def parse_target(target) when is_binary(target) do
+    # Handle IPv6 addresses that might contain colons
+    case parse_host_port_string(target) do
+      {host_str, nil} ->
+        # No port specified, use default
+        parse_host_with_port(host_str, 161)
+      
+      {host_str, port_str} ->
+        # Port specified, validate it
+        case parse_port(port_str) do
+          {:ok, port} -> parse_host_with_port(host_str, port)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+  
+  def parse_target({a, b, c, d} = ip_tuple) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) do
+    if valid_ip_tuple?(ip_tuple) do
+      {:ok, %{host: ip_tuple, port: 161}}
+    else
+      {:error, {:invalid_ip_tuple, ip_tuple}}
+    end
+  end
+  
+  def parse_target(%{host: host, port: port}) when is_integer(port) do
+    if port > 0 and port <= 65535 do
+      case parse_host(host) do
+        {:ok, parsed_host} -> {:ok, %{host: parsed_host, port: port}}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, {:invalid_port, Integer.to_string(port)}}
+    end
+  end
+  
+  def parse_target(%{host: host}) do
+    case parse_host(host) do
+      {:ok, parsed_host} -> {:ok, %{host: parsed_host, port: 161}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  
+  def parse_target(invalid) do
+    {:error, {:invalid_target_format, invalid}}
+  end
+
   ## Validation Functions
   
   @doc """
@@ -437,6 +534,103 @@ defmodule SnmpLib.Utils do
   def sanitize_community(_), do: "<invalid>"
   
   ## Private Helper Functions
+  
+  # Target parsing helpers
+  defp parse_host_port_string(target_str) do
+    # Check if this looks like IPv6 first (contains :: or multiple colons)
+    if String.contains?(target_str, "::") or (target_str |> String.graphemes() |> Enum.count(&(&1 == ":"))) > 1 do
+      # Likely IPv6, treat as hostname without port
+      {target_str, nil}
+    else
+      # Handle regular host:port parsing
+      case String.split(target_str, ":", parts: 2) do
+        [host_str] -> 
+          {host_str, nil}
+        
+        [host_str, port_str] ->
+          # Check if host part looks like IPv4 or simple hostname first
+          if is_ipv4_or_simple_hostname?(host_str) do
+            # Now check if port is valid - if not, return error rather than treating as hostname
+            {host_str, port_str}
+          else
+            # Complex hostname with colons, treat as hostname without port
+            {target_str, nil}
+          end
+      end
+    end
+  end
+  
+  defp parse_host_with_port(host_str, port) do
+    case parse_host(host_str) do
+      {:ok, host} -> {:ok, %{host: host, port: port}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  
+  defp parse_host(host) when is_binary(host) do
+    case :inet.parse_address(String.to_charlist(host)) do
+      {:ok, {a, b, c, d}} when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) -> 
+        # IPv4 address
+        {:ok, {a, b, c, d}}
+      {:ok, _ipv6_tuple} -> 
+        # IPv6 address - treat as hostname for now to maintain consistency
+        {:ok, host}
+      {:error, :einval} -> 
+        # Not an IP, treat as hostname
+        {:ok, host}
+    end
+  end
+  
+  defp parse_host({a, b, c, d} = ip_tuple) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) do
+    if valid_ip_tuple?(ip_tuple) do
+      {:ok, ip_tuple}
+    else
+      {:error, {:invalid_ip_tuple, ip_tuple}}
+    end
+  end
+  
+  defp parse_host(invalid) do
+    {:error, {:invalid_host_format, invalid}}
+  end
+  
+  defp parse_port(port_str) when is_binary(port_str) do
+    case Integer.parse(port_str) do
+      {port, ""} when port > 0 and port <= 65535 -> {:ok, port}
+      {_port, ""} -> {:error, {:invalid_port, port_str}}
+      _ -> {:error, {:invalid_port_format, port_str}}
+    end
+  end
+  
+  defp valid_ip_tuple?({a, b, c, d}) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) do
+    a >= 0 and a <= 255 and
+    b >= 0 and b <= 255 and
+    c >= 0 and c <= 255 and
+    d >= 0 and d <= 255
+  end
+  defp valid_ip_tuple?(_), do: false
+  
+  defp is_ipv4_or_simple_hostname?(host_str) do
+    # Check if it looks like IPv4 (has 3 dots and only digits/dots)
+    case String.split(host_str, ".") do
+      [a, b, c, d] ->
+        # Looks like IPv4, check if all parts are numeric
+        Enum.all?([a, b, c, d], fn part ->
+          case Integer.parse(part) do
+            {num, ""} when num >= 0 and num <= 255 -> true
+            _ -> false
+          end
+        end)
+      _ ->
+        # Not IPv4 format, check if it's a simple hostname
+        # Exclude anything that looks like IPv6 (contains :: or multiple colons)
+        cond do
+          String.contains?(host_str, "::") -> false  # IPv6 
+          (host_str |> String.graphemes() |> Enum.count(&(&1 == ":"))) > 1 -> false  # IPv6 or complex
+          String.contains?(host_str, ":") -> false  # Contains colon, not simple
+          true -> String.match?(host_str, ~r/^[a-zA-Z0-9\-\.\_]+$/)  # Simple hostname pattern
+        end
+    end
+  end
   
   defp format_pdu_type(:get_request), do: "GET Request"
   defp format_pdu_type(:get_next_request), do: "GET-NEXT Request"

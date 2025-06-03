@@ -272,7 +272,6 @@ defmodule SnmpLib.DocsisMibTest do
     
     case Parser.parse_tokens(tokens) do
       {:ok, mib} -> {mib, []}
-      {:warning, mib, warnings} -> {mib, warnings}
       {:error, errors} when is_list(errors) -> 
         first_error = List.first(errors)
         flunk("Expected successful parsing but got error: #{SnmpLib.MIB.Error.format(first_error)}")

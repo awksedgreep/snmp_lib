@@ -278,6 +278,57 @@ defmodule SnmpLib.Config do
   def reload do
     GenServer.call(__MODULE__, :reload)
   end
+
+  @doc """
+  Merges user-provided options with default SNMP configuration values.
+  
+  This function provides the default SNMP configuration options that are commonly
+  used across SNMP operations, then merges them with user-provided options. User
+  options take precedence over defaults.
+  
+  ## Default Values
+  
+  - `community`: "public"
+  - `timeout`: 5000 (milliseconds)
+  - `retries`: 3
+  - `port`: 161
+  - `version`: :v2c
+  - `mib_paths`: []
+  
+  ## Parameters
+  
+  - `opts`: Keyword list of user-provided options that override defaults
+  
+  ## Returns
+  
+  Keyword list with defaults merged with user options, where user options take precedence.
+  
+  ## Examples
+  
+      iex> SnmpLib.Config.merge_opts([])
+      [community: "public", timeout: 5000, retries: 3, port: 161, version: :v2c, mib_paths: []]
+      
+      iex> SnmpLib.Config.merge_opts([timeout: 10000])
+      [community: "public", timeout: 10000, retries: 3, port: 161, version: :v2c, mib_paths: []]
+      
+      iex> SnmpLib.Config.merge_opts([community: "private", port: 162])
+      [community: "private", timeout: 5000, retries: 3, port: 162, version: :v2c, mib_paths: []]
+  """
+  @spec merge_opts(keyword()) :: keyword()
+  def merge_opts(opts) when is_list(opts) do
+    # Get default SNMP values from the configuration system
+    defaults = [
+      community: get(:snmp, :default_community, "public"),
+      timeout: get(:snmp, :default_timeout, 5000),
+      retries: get(:snmp, :default_retries, 3),
+      port: get(:snmp, :default_port, 161),
+      version: get(:snmp, :default_version, :v2c),
+      mib_paths: get(:snmp, :mib_paths, [])
+    ]
+    
+    # Merge defaults with user options, user options take precedence
+    Keyword.merge(defaults, opts)
+  end
   
   ## GenServer Implementation
   

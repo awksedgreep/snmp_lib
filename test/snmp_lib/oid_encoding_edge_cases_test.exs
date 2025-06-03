@@ -25,7 +25,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, oid}
+        expected_string = Enum.join(oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "First two subidentifiers #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
@@ -118,8 +119,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
       # Test explicit type with different input formats
       explicit_tests = [
         # Valid inputs
-        {[1, 3, 6, 1, 2, 1, 1, 1, 0], {:object_identifier, [1, 3, 6, 1, 2, 1, 1, 1, 0]}, "valid list"},
-        {"1.3.6.1.2.1.1.1.0", {:object_identifier, [1, 3, 6, 1, 2, 1, 1, 1, 0]}, "valid string"},
+        {[1, 3, 6, 1, 2, 1, 1, 1, 0], {:object_identifier, "1.3.6.1.2.1.1.1.0"}, "valid list"},
+        {"1.3.6.1.2.1.1.1.0", {:object_identifier, "1.3.6.1.2.1.1.1.0"}, "valid string"},
         
         # Invalid inputs that should become :null
         {[], :null, "empty list"},
@@ -167,7 +168,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, long_oid}
+        expected_string = Enum.join(long_oid, ".")
+        expected = {:object_identifier, expected_string}
         
         assert decoded_value == expected, 
           "Long OID with #{length(long_oid)} components failed: got #{inspect(decoded_value)}"
@@ -203,7 +205,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
       results = Task.await_many(tasks, 5000)
       
       Enum.each(results, fn {original_oid, decoded_value} ->
-        expected = {:object_identifier, original_oid}
+        expected_string = Enum.join(original_oid, ".")
+        expected = {:object_identifier, expected_string}
         assert decoded_value == expected, 
           "Concurrent test failed for OID #{inspect(original_oid)}: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
       end)
@@ -224,7 +227,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         test_oid = [1, 3, 6, 1, 4, 1, value]
         
         # Test multiple round trips to ensure ASN.1 compliance
-        original = {:object_identifier, test_oid}
+        expected_string = Enum.join(test_oid, ".")
+        original = {:object_identifier, expected_string}
         
         # Round trip 1
         varbinds1 = [{[1, 3, 6, 1], :auto, original}]

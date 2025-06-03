@@ -1288,6 +1288,17 @@ defmodule SnmpLib.PDU do
   defp decode_unsigned_integer(data) when byte_size(data) <= 4 do
     :binary.decode_unsigned(data, :big)
   end
+  defp decode_unsigned_integer(data) when byte_size(data) == 5 do
+    # Handle 5-byte case for large 32-bit unsigned values that require leading zero padding
+    case data do
+      <<0, rest::binary-size(4)>> ->
+        # Leading zero byte for unsigned representation, decode the remaining 4 bytes
+        :binary.decode_unsigned(rest, :big)
+      _ ->
+        # If first byte is not zero, this exceeds 32-bit range
+        0
+    end
+  end
   defp decode_unsigned_integer(_), do: 0
 
   defp decode_counter64(data) when byte_size(data) == 8 do
