@@ -440,6 +440,54 @@ defmodule SnmpLib.Transport do
   end
 
   @doc """
+  Sends a request packet and waits for a response.
+  
+  This creates a temporary socket, sends a packet, waits for the response,
+  and returns the response data. Useful for SNMPv3 discovery and security operations.
+  
+  ## Parameters
+  
+  - `dest_address`: Destination IP address or hostname
+  - `dest_port`: Destination port number
+  - `request_data`: Binary request data to send
+  - `timeout`: Timeout in milliseconds (default: 5000)
+  
+  ## Returns
+  
+  - `{:ok, response_data}` if request succeeds and response received
+  - `{:error, reason}` if request fails or times out
+  
+  ## Examples
+  
+      {:ok, response} = SnmpLib.Transport.send_request("192.168.1.100", 161, request_packet, 5000)
+      {:error, :timeout} = SnmpLib.Transport.send_request("10.0.0.1", 161, request_packet, 1000)
+  """
+  @spec send_request(address(), port_number(), packet_data(), non_neg_integer()) :: 
+    {:ok, packet_data()} | {:error, atom()}
+  def send_request(dest_address, dest_port, request_data, timeout \\ 5000) do
+    case create_client_socket() do
+      {:ok, socket} ->
+        try do
+          case send_packet(socket, dest_address, dest_port, request_data) do
+            :ok ->
+              case receive_packet(socket, timeout) do
+                {:ok, {response_data, _from_addr, _from_port}} -> 
+                  {:ok, response_data}
+                {:error, reason} -> 
+                  {:error, reason}
+              end
+            {:error, reason} ->
+              {:error, reason}
+          end
+        after
+          close_socket(socket)
+        end
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Gets socket statistics and information.
   
   ## Examples

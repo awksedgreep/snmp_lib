@@ -372,12 +372,21 @@ defmodule SnmpLib.Security.USM do
   defp parse_discovery_response(response) do
     case PDU.decode_message(response) do
       {:ok, decoded} ->
-        # Extract engine ID from security parameters
-        engine_id = decoded.security_parameters.authoritative_engine_id
-        if byte_size(engine_id) > 0 do
-          {:ok, engine_id}
-        else
-          {:error, :empty_engine_id}
+        # Check if this is an SNMPv3 message with security parameters
+        case Map.get(decoded, :security_parameters) do
+          nil ->
+            # This is likely an SNMPv1/v2c message, not v3
+            {:error, :not_snmpv3_message}
+          security_params ->
+            # Extract engine ID from security parameters
+            case Map.get(security_params, :authoritative_engine_id) do
+              nil ->
+                {:error, :missing_engine_id}
+              engine_id when is_binary(engine_id) and byte_size(engine_id) > 0 ->
+                {:ok, engine_id}
+              _ ->
+                {:error, :empty_engine_id}
+            end
         end
       {:error, reason} ->
         {:error, reason}
@@ -414,10 +423,16 @@ defmodule SnmpLib.Security.USM do
   defp parse_time_sync_response(response) do
     case PDU.decode_message(response) do
       {:ok, decoded} ->
-        params = decoded.security_parameters
-        boots = params.authoritative_engine_boots
-        time = params.authoritative_engine_time
-        {:ok, {boots, time}}
+        # Check if this is an SNMPv3 message with security parameters
+        case Map.get(decoded, :security_parameters) do
+          nil ->
+            # This is likely an SNMPv1/v2c message, not v3
+            {:error, :not_snmpv3_message}
+          security_params ->
+            boots = Map.get(security_params, :authoritative_engine_boots, 0)
+            time = Map.get(security_params, :authoritative_engine_time, 0)
+            {:ok, {boots, time}}
+        end
       {:error, reason} ->
         {:error, reason}
     end
@@ -487,12 +502,37 @@ defmodule SnmpLib.Security.USM do
   defp parse_secure_message(secure_message) do
     case PDU.decode_message(secure_message) do
       {:ok, decoded} ->
-        scoped_pdu = decoded.scoped_pdu
-        security_params = decoded.security_parameters
-        flags = decoded.flags
-        {:ok, {scoped_pdu, security_params, flags}}
+        # Check if this is an SNMPv3 message with required fields
+        with {:ok, scoped_pdu} <- get_scoped_pdu(decoded),
+             {:ok, security_params} <- get_security_parameters(decoded),
+             {:ok, flags} <- get_message_flags(decoded) do
+          {:ok, {scoped_pdu, security_params, flags}}
+        else
+          {:error, reason} -> {:error, reason}
+        end
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+  
+  defp get_scoped_pdu(decoded) do
+    case Map.get(decoded, :scoped_pdu) do
+      nil -> {:error, :missing_scoped_pdu}
+      scoped_pdu -> {:ok, scoped_pdu}
+    end
+  end
+  
+  defp get_security_parameters(decoded) do
+    case Map.get(decoded, :security_parameters) do
+      nil -> {:error, :missing_security_parameters}
+      security_params -> {:ok, security_params}
+    end
+  end
+  
+  defp get_message_flags(decoded) do
+    case Map.get(decoded, :flags) do
+      nil -> {:error, :missing_message_flags}
+      flags -> {:ok, flags}
     end
   end
   

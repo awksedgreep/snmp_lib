@@ -314,7 +314,7 @@ defmodule SnmpLib.Security.Keys do
     
     1..length
     |> Enum.map(fn _i ->
-      random_index = :crypto.rand_uniform(0, charset_size)
+      random_index = :rand.uniform(charset_size) - 1
       String.at(charset, random_index)
     end)
     |> Enum.join()

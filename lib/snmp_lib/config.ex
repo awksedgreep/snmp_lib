@@ -583,16 +583,25 @@ defmodule SnmpLib.Config do
   
   # Update configuration value in ETS
   defp update_config_value(section, key, value) do
-    case :ets.lookup(@config_table, section) do
-      [{^section, config}] ->
-        updated_config = put_nested_value(config, key, value)
-        :ets.insert(@config_table, {section, updated_config})
-        :ok
-      [] ->
-        # Create new section
-        new_config = put_nested_value(%{}, key, value)
-        :ets.insert(@config_table, {section, new_config})
-        :ok
+    try do
+      case :ets.lookup(@config_table, section) do
+        [{^section, config}] ->
+          updated_config = put_nested_value(config, key, value)
+          :ets.insert(@config_table, {section, updated_config})
+          :ok
+        [] ->
+          # Create new section
+          new_config = put_nested_value(%{}, key, value)
+          :ets.insert(@config_table, {section, new_config})
+          :ok
+      end
+    rescue
+      FunctionClauseError ->
+        {:error, :invalid_key_format}
+      ArgumentError ->
+        {:error, :invalid_config_path}
+      error ->
+        {:error, {:unexpected_error, error}}
     end
   end
   

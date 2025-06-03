@@ -342,12 +342,18 @@ defmodule SnmpLib.Manager do
     community = opts[:community] || @default_community
     version = opts[:version] || @default_version
     timeout = opts[:timeout] || @default_timeout
-    port = opts[:port] || @default_port
+    default_port = opts[:port] || @default_port
+    
+    # Parse target to handle host:port strings properly
+    {parsed_host, parsed_port} = case SnmpLib.Utils.parse_target(host) do
+      {:ok, %{host: h, port: p}} -> {h, p}
+      {:error, _} -> {host, default_port}  # Fall back to original host and default port
+    end
     
     message = SnmpLib.PDU.build_message(pdu, community, version)
     
     with {:ok, packet} <- SnmpLib.PDU.encode_message(message),
-         {:ok, response_packet} <- send_and_receive(socket, host, port, packet, timeout),
+         {:ok, response_packet} <- send_and_receive(socket, parsed_host, parsed_port, packet, timeout),
          {:ok, response_message} <- SnmpLib.PDU.decode_message(response_packet) do
       {:ok, response_message}
     else
