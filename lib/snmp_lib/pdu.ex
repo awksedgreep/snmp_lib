@@ -1247,7 +1247,10 @@ defmodule SnmpLib.PDU do
   end
   defp parse_value(<<@object_identifier, length, oid_data::binary-size(length), rest::binary>>) do
     case decode_oid_data(oid_data) do
-      {:ok, oid} -> {:ok, {{:object_identifier, oid}, rest}}
+      {:ok, oid_list} -> 
+        # Convert list back to string format for consistency
+        oid_string = Enum.join(oid_list, ".")
+        {:ok, {{:object_identifier, oid_string}, rest}}
       {:error, _} -> {:ok, {{:unknown, oid_data}, rest}}
     end
   end
