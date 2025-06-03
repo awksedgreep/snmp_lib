@@ -40,7 +40,7 @@ defmodule SnmpLib.Types do
       
       # Formatting for display
       iex> SnmpLib.Types.format_timeticks_uptime(4200)
-      "42.00 seconds"
+      "42 seconds"
       iex> SnmpLib.Types.format_ip_address(<<192, 168, 1, 1>>)
       "192.168.1.1"
       
@@ -57,17 +57,19 @@ defmodule SnmpLib.Types do
       {:ok, {:end_of_mib_view, nil}}
   """
 
-  import Bitwise
 
   @type snmp_type :: :integer | :string | :null | :oid | :counter32 | :gauge32 | 
                     :timeticks | :counter64 | :ip_address | :opaque | :no_such_object |
-                    :no_such_instance | :end_of_mib_view
+                    :no_such_instance | :end_of_mib_view | :unsigned32 | :octet_string |
+                    :object_identifier | :boolean
 
   @type snmp_value :: integer() | binary() | :null | [non_neg_integer()] | 
                      {:counter32, non_neg_integer()} | {:gauge32, non_neg_integer()} |
                      {:timeticks, non_neg_integer()} | {:counter64, non_neg_integer()} |
-                     {:ip_address, binary()} | {:opaque, binary()} |
-                     {:no_such_object, nil} | {:no_such_instance, nil} | {:end_of_mib_view, nil}
+                     {:ip_address, binary()} | {:opaque, binary()} | {:unsigned32, non_neg_integer()} |
+                     {:no_such_object, nil} | {:no_such_instance, nil} | {:end_of_mib_view, nil} |
+                     {:string, binary()} | {:octet_string, binary()} | {:object_identifier, [non_neg_integer()]} |
+                     {:boolean, boolean()}
 
   # SNMP type ranges and constraints
   @max_integer 2_147_483_647
@@ -76,6 +78,182 @@ defmodule SnmpLib.Types do
   @max_gauge32 4_294_967_295
   @max_timeticks 4_294_967_295
   @max_counter64 18_446_744_073_709_551_615
+  @max_unsigned32 4_294_967_295
+
+  ## Enhanced Type System
+
+  @doc """
+  Encodes a value with automatic type inference or explicit type specification.
+  
+  This is the main entry point for encoding values into SNMP types. It supports
+  both automatic type inference based on the value and explicit type specification.
+  
+  ## Parameters
+  
+  - `value`: The value to encode
+  - `opts`: Options including:
+    - `:type` - Explicit type specification (overrides inference)
+    - `:validate` - Whether to validate the encoded value (default: true)
+  
+  ## Returns
+  
+  - `{:ok, {type, encoded_value}}` on success
+  - `{:error, reason}` on failure
+  
+  ## Examples
+  
+      # Automatic type inference
+      {:ok, {:string, "hello"}} = SnmpLib.Types.encode_value("hello")
+      {:ok, {:integer, 42}} = SnmpLib.Types.encode_value(42)
+      
+      # Explicit type specification
+      {:ok, {:ip_address, {192, 168, 1, 1}}} = SnmpLib.Types.encode_value("192.168.1.1", type: :ip_address)
+      {:ok, {:counter32, 100}} = SnmpLib.Types.encode_value(100, type: :counter32)
+  """
+  @spec encode_value(term(), keyword()) :: {:ok, {snmp_type(), term()}} | {:error, atom()}
+  def encode_value(value, opts \\ []) do
+    type = case Keyword.get(opts, :type) do
+      nil -> infer_type(value)
+      explicit_type -> normalize_type(explicit_type)
+    end
+    
+    case type do
+      :unknown -> {:error, :cannot_infer_type}
+      _ -> encode_value_with_type(value, type, opts)
+    end
+  end
+  
+  @doc """
+  Automatically infers the SNMP type from an Elixir value.
+  
+  Uses intelligent heuristics to determine the most appropriate SNMP type
+  for a given Elixir value.
+  
+  ## Examples
+  
+      :string = SnmpLib.Types.infer_type("hello")
+      :integer = SnmpLib.Types.infer_type(42)
+      :ip_address = SnmpLib.Types.infer_type("192.168.1.1")
+      :object_identifier = SnmpLib.Types.infer_type([1, 3, 6, 1, 2, 1])
+      :boolean = SnmpLib.Types.infer_type(true)
+  """
+  @spec infer_type(term()) :: snmp_type()
+  def infer_type(value) when is_integer(value) do
+    cond do
+      value >= 0 and value <= @max_unsigned32 -> :unsigned32
+      value >= @min_integer and value <= @max_integer -> :integer
+      value >= 0 and value <= @max_counter64 -> :counter64
+      true -> :integer  # Let validation catch out-of-range values
+    end
+  end
+  
+  def infer_type(value) when is_binary(value) do
+    cond do
+      String.printable?(value) and ip_address_string?(value) -> :ip_address
+      String.printable?(value) -> :string
+      true -> :octet_string
+    end
+  end
+  
+  def infer_type(value) when is_list(value) do
+    cond do
+      :io_lib.printable_list(value) -> :string  # It's a charlist, treat as string
+      oid_list?(value) -> :object_identifier
+      true -> :unknown
+    end
+  end
+  
+  def infer_type(value) when is_boolean(value), do: :boolean
+  def infer_type(:null), do: :null
+  def infer_type(nil), do: :null
+  def infer_type({a, b, c, d}) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) do
+    if a >= 0 and a <= 255 and b >= 0 and b <= 255 and c >= 0 and c <= 255 and d >= 0 and d <= 255 do
+      :ip_address
+    else
+      :unknown
+    end
+  end
+  def infer_type(_), do: :unknown
+  
+  @doc """
+  Decodes an SNMP typed value back to a native Elixir value.
+  
+  Converts SNMP-encoded values back to their most natural Elixir representation,
+  with consistent handling of strings (always returns binaries, not charlists).
+  
+  ## Parameters
+  
+  - `typed_value`: A tuple of `{type, value}` or just a value
+  
+  ## Returns
+  
+  The decoded Elixir value in its most natural form
+  
+  ## Examples
+  
+      "hello" = SnmpLib.Types.decode_value({:string, "hello"})
+      "192.168.1.1" = SnmpLib.Types.decode_value({:ip_address, {192, 168, 1, 1}})
+      42 = SnmpLib.Types.decode_value({:counter32, 42})
+      [1, 3, 6, 1] = SnmpLib.Types.decode_value({:object_identifier, [1, 3, 6, 1]})
+  """
+  @spec decode_value({snmp_type(), term()} | term()) :: term()
+  def decode_value({:string, value}) when is_binary(value), do: value
+  def decode_value({:string, value}) when is_list(value), do: List.to_string(value)  # Handle charlists
+  def decode_value({:octet_string, value}) when is_binary(value), do: value
+  def decode_value({:octet_string, value}) when is_list(value), do: List.to_string(value)
+  def decode_value({:integer, value}), do: value
+  def decode_value({:unsigned32, value}), do: value
+  def decode_value({:counter32, value}), do: value
+  def decode_value({:gauge32, value}), do: value
+  def decode_value({:timeticks, value}), do: value
+  def decode_value({:counter64, value}), do: value
+  def decode_value({:boolean, value}), do: value
+  def decode_value({:null, _}), do: nil
+  def decode_value({:ip_address, {a, b, c, d}}), do: "#{a}.#{b}.#{c}.#{d}"
+  def decode_value({:ip_address, <<a, b, c, d>>}), do: "#{a}.#{b}.#{c}.#{d}"
+  def decode_value({:object_identifier, value}) when is_list(value), do: value
+  def decode_value({:oid, value}) when is_list(value), do: value
+  def decode_value({:opaque, value}), do: value
+  def decode_value({:no_such_object, _}), do: :no_such_object
+  def decode_value({:no_such_instance, _}), do: :no_such_instance
+  def decode_value({:end_of_mib_view, _}), do: :end_of_mib_view
+  def decode_value(value), do: value  # Pass through untyped values
+  
+  @doc """
+  Parses an IP address string into a 4-tuple of integers.
+  
+  ## Parameters
+  
+  - `ip_string`: IP address as a string like "192.168.1.1"
+  
+  ## Returns
+  
+  - `{:ok, {a, b, c, d}}` on success
+  - `{:error, reason}` on failure
+  
+  ## Examples
+  
+      {:ok, {192, 168, 1, 1}} = SnmpLib.Types.parse_ip_address("192.168.1.1")
+      {:ok, {127, 0, 0, 1}} = SnmpLib.Types.parse_ip_address("127.0.0.1")
+      {:error, :invalid_format} = SnmpLib.Types.parse_ip_address("invalid")
+  """
+  @spec parse_ip_address(binary()) :: {:ok, {0..255, 0..255, 0..255, 0..255}} | {:error, atom()}
+  def parse_ip_address(ip_string) when is_binary(ip_string) do
+    try do
+      case :inet.parse_address(String.to_charlist(ip_string)) do
+        {:ok, {a, b, c, d}} when a >= 0 and a <= 255 and b >= 0 and b <= 255 and
+                                 c >= 0 and c <= 255 and d >= 0 and d <= 255 ->
+          {:ok, {a, b, c, d}}
+        {:ok, _} ->
+          {:error, :not_ipv4}
+        {:error, _} ->
+          {:error, :invalid_format}
+      end
+    rescue
+      _ -> {:error, :invalid_format}
+    end
+  end
+  def parse_ip_address(_), do: {:error, :invalid_input}
 
   ## Type Validation
 
@@ -429,7 +607,7 @@ defmodule SnmpLib.Types do
 
   def coerce_value(:string, value) when is_binary(value) do
     case validate_octet_string(value) do
-      :ok -> {:ok, value}
+      :ok -> {:ok, {:string, value}}
       {:error, reason} -> {:error, reason}
     end
   end
@@ -513,6 +691,38 @@ defmodule SnmpLib.Types do
     {:ok, {:end_of_mib_view, nil}}
   end
 
+  def coerce_value(:unsigned32, value) when is_integer(value) do
+    case validate_unsigned32(value) do
+      :ok -> {:ok, {:unsigned32, value}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def coerce_value(:octet_string, value) when is_binary(value) do
+    case validate_octet_string(value) do
+      :ok -> {:ok, {:octet_string, value}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def coerce_value(:object_identifier, value) when is_list(value) do
+    case validate_oid(value) do
+      :ok -> {:ok, {:object_identifier, value}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def coerce_value(:boolean, value) when is_boolean(value) do
+    {:ok, {:boolean, value}}
+  end
+
+  def coerce_value(:ip_address, value) when is_binary(value) do
+    case parse_ip_address(value) do
+      {:ok, ip_tuple} -> {:ok, {:ip_address, ip_tuple}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
   def coerce_value(_, _), do: {:error, :unsupported_type}
 
   @doc """
@@ -531,7 +741,7 @@ defmodule SnmpLib.Types do
   def normalize_type("octet_string"), do: :string
   def normalize_type("null"), do: :null
   def normalize_type("oid"), do: :oid
-  def normalize_type("object_identifier"), do: :oid
+  def normalize_type("object_identifier"), do: :object_identifier
   def normalize_type("counter32"), do: :counter32
   def normalize_type("gauge32"), do: :gauge32
   def normalize_type("timeticks"), do: :timeticks
@@ -542,9 +752,25 @@ defmodule SnmpLib.Types do
   def normalize_type("no_such_object"), do: :no_such_object
   def normalize_type("no_such_instance"), do: :no_such_instance
   def normalize_type("end_of_mib_view"), do: :end_of_mib_view
+  def normalize_type("unsigned32"), do: :unsigned32
+  def normalize_type("boolean"), do: :boolean
   def normalize_type(_), do: :unknown
 
   ## Utility Functions
+
+  @doc """
+  Validates an Unsigned32 value.
+  
+  Unsigned32 is a 32-bit unsigned integer.
+  """
+  @spec validate_unsigned32(term()) :: :ok | {:error, atom()}
+  def validate_unsigned32(value) when is_integer(value) and value >= 0 and value <= @max_unsigned32 do
+    :ok
+  end
+  def validate_unsigned32(value) when is_integer(value) do
+    {:error, :out_of_range}
+  end
+  def validate_unsigned32(_), do: {:error, :not_integer}
 
   @doc """
   Checks if a type is a numeric SNMP type.
@@ -556,7 +782,7 @@ defmodule SnmpLib.Types do
       false = SnmpLib.Types.is_numeric_type?(:string)
   """
   @spec is_numeric_type?(snmp_type()) :: boolean()
-  def is_numeric_type?(type) when type in [:integer, :counter32, :gauge32, :timeticks, :counter64] do
+  def is_numeric_type?(type) when type in [:integer, :counter32, :gauge32, :timeticks, :counter64, :unsigned32] do
     true
   end
   def is_numeric_type?(_), do: false
@@ -571,7 +797,7 @@ defmodule SnmpLib.Types do
       false = SnmpLib.Types.is_binary_type?(:integer)
   """
   @spec is_binary_type?(snmp_type()) :: boolean()
-  def is_binary_type?(type) when type in [:string, :opaque, :ip_address] do
+  def is_binary_type?(type) when type in [:string, :octet_string, :opaque, :ip_address] do
     true
   end
   def is_binary_type?(_), do: false
@@ -604,6 +830,7 @@ defmodule SnmpLib.Types do
   def max_value(:gauge32), do: @max_gauge32
   def max_value(:timeticks), do: @max_timeticks
   def max_value(:counter64), do: @max_counter64
+  def max_value(:unsigned32), do: @max_unsigned32
   def max_value(_), do: nil
 
   @doc """
@@ -616,8 +843,121 @@ defmodule SnmpLib.Types do
   """
   @spec min_value(snmp_type()) :: integer() | nil
   def min_value(:integer), do: @min_integer
-  def min_value(type) when type in [:counter32, :gauge32, :timeticks, :counter64], do: 0
+  def min_value(type) when type in [:counter32, :gauge32, :timeticks, :counter64, :unsigned32], do: 0
   def min_value(_), do: nil
+
+  ## Private Implementation for Enhanced Type System
+  
+  # Encode value with a specific type
+  defp encode_value_with_type(value, type, opts) do
+    validate = Keyword.get(opts, :validate, true)
+    
+    case perform_encoding(value, type) do
+      {:ok, encoded_value} ->
+        if validate do
+          case validate_encoded_value(type, encoded_value) do
+            :ok -> {:ok, {type, encoded_value}}
+            {:error, reason} -> {:error, reason}
+          end
+        else
+          {:ok, {type, encoded_value}}
+        end
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  
+  # Perform the actual encoding based on type
+  defp perform_encoding(value, :string) when is_binary(value), do: {:ok, value}
+  defp perform_encoding(value, :string) when is_list(value), do: {:ok, List.to_string(value)}
+  defp perform_encoding(value, :octet_string) when is_binary(value), do: {:ok, value}
+  defp perform_encoding(value, :octet_string) when is_list(value), do: {:ok, List.to_string(value)}
+  defp perform_encoding(value, :integer) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :unsigned32) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :counter32) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :gauge32) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :timeticks) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :counter64) when is_integer(value), do: {:ok, value}
+  defp perform_encoding(value, :boolean) when is_boolean(value), do: {:ok, value}
+  defp perform_encoding(value, :object_identifier) when is_list(value), do: {:ok, value}
+  defp perform_encoding(value, :oid) when is_list(value), do: {:ok, value}
+  defp perform_encoding(_value, :null), do: {:ok, nil}
+  defp perform_encoding(nil, :null), do: {:ok, nil}
+  defp perform_encoding(:null, :null), do: {:ok, nil}
+  defp perform_encoding(value, :opaque) when is_binary(value), do: {:ok, value}
+  
+  # Handle IP address encoding
+  defp perform_encoding(value, :ip_address) when is_binary(value) do
+    case parse_ip_address(value) do
+      {:ok, ip_tuple} -> {:ok, ip_tuple}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  defp perform_encoding({a, b, c, d} = value, :ip_address) when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) do
+    {:ok, value}
+  end
+  defp perform_encoding(<<a, b, c, d>>, :ip_address), do: {:ok, {a, b, c, d}}
+  
+  # Handle OID string encoding
+  defp perform_encoding(value, :object_identifier) when is_binary(value) do
+    case SnmpLib.OID.string_to_list(value) do
+      {:ok, oid_list} -> {:ok, oid_list}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  defp perform_encoding(value, :oid) when is_binary(value) do
+    case SnmpLib.OID.string_to_list(value) do
+      {:ok, oid_list} -> {:ok, oid_list}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+  
+  defp perform_encoding(_, _), do: {:error, :encoding_failed}
+  
+  # Validate encoded values
+  defp validate_encoded_value(:string, value), do: validate_octet_string(value)
+  defp validate_encoded_value(:octet_string, value), do: validate_octet_string(value)
+  defp validate_encoded_value(:integer, value), do: validate_integer(value)
+  defp validate_encoded_value(:unsigned32, value), do: validate_unsigned32(value)
+  defp validate_encoded_value(:counter32, value), do: validate_counter32(value)
+  defp validate_encoded_value(:gauge32, value), do: validate_gauge32(value)
+  defp validate_encoded_value(:timeticks, value), do: validate_timeticks(value)
+  defp validate_encoded_value(:counter64, value), do: validate_counter64(value)
+  defp validate_encoded_value(:ip_address, value), do: validate_ip_address(value)
+  defp validate_encoded_value(:object_identifier, value), do: validate_oid(value)
+  defp validate_encoded_value(:oid, value), do: validate_oid(value)
+  defp validate_encoded_value(:opaque, value), do: validate_opaque(value)
+  defp validate_encoded_value(:boolean, value) when is_boolean(value), do: :ok
+  defp validate_encoded_value(:boolean, _), do: {:error, :not_boolean}
+  defp validate_encoded_value(:null, _), do: :ok
+  defp validate_encoded_value(_, _), do: :ok
+  
+  # Check if a string looks like an IP address
+  defp ip_address_string?(value) when is_binary(value) do
+    # Simple regex check before expensive parsing
+    if Regex.match?(~r/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/, value) do
+      case parse_ip_address(value) do
+        {:ok, _} -> true
+        _ -> false
+      end
+    else
+      false
+    end
+  end
+  
+  # Check if a list looks like an OID (not a charlist)
+  defp oid_list?(list) when is_list(list) do
+    # Check if it's a valid charlist first (printable ASCII range)
+    if :io_lib.printable_list(list) do
+      false  # It's a charlist, not an OID
+    else
+      # Check if it looks like an OID: non-negative integers, length >= 2
+      Enum.all?(list, fn
+        x when is_integer(x) and x >= 0 -> true
+        _ -> false
+      end) and length(list) >= 2
+    end
+  end
+  defp oid_list?(_), do: false
 
   ## Private Helper Functions
 

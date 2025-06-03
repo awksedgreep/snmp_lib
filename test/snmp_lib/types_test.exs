@@ -285,10 +285,10 @@ defmodule SnmpLib.TypesTest do
 
     test "coerces string values correctly" do
       {:ok, result} = Types.coerce_value(:string, "test")
-      assert result == "test"
+      assert result == {:string, "test"}
       
       {:ok, result} = Types.coerce_value(:string, <<1, 2, 3>>)
-      assert result == <<1, 2, 3>>
+      assert result == {:string, <<1, 2, 3>>}
     end
 
     test "coerces null values correctly" do
@@ -369,7 +369,7 @@ defmodule SnmpLib.TypesTest do
       assert Types.normalize_type("string") == :string
       assert Types.normalize_type("octet_string") == :string
       assert Types.normalize_type("counter32") == :counter32
-      assert Types.normalize_type("object_identifier") == :oid
+      assert Types.normalize_type("object_identifier") == :object_identifier
       assert Types.normalize_type("ipaddress") == :ip_address
     end
 

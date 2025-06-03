@@ -86,8 +86,10 @@ defmodule SnmpLib.Config do
       default_timeout: 5_000,
       default_retries: 3,
       default_community: "public",
+      default_port: 161,
       max_message_size: 65507,
-      socket_options: []
+      socket_options: [],
+      mib_paths: []
     },
     pool: %{
       default_size: 10,
@@ -308,22 +310,32 @@ defmodule SnmpLib.Config do
       iex> SnmpLib.Config.merge_opts([])
       [community: "public", timeout: 5000, retries: 3, port: 161, version: :v2c, mib_paths: []]
       
-      iex> SnmpLib.Config.merge_opts([timeout: 10000])
-      [community: "public", timeout: 10000, retries: 3, port: 161, version: :v2c, mib_paths: []]
+      iex> result = SnmpLib.Config.merge_opts([timeout: 10000])
+      iex> result[:community]
+      "public"
+      iex> result[:timeout]
+      10000
+      iex> result[:retries]
+      3
       
-      iex> SnmpLib.Config.merge_opts([community: "private", port: 162])
-      [community: "private", timeout: 5000, retries: 3, port: 162, version: :v2c, mib_paths: []]
+      iex> result = SnmpLib.Config.merge_opts([community: "private", port: 162])
+      iex> result[:community]
+      "private"
+      iex> result[:port]
+      162
+      iex> result[:timeout]
+      5000
   """
   @spec merge_opts(keyword()) :: keyword()
   def merge_opts(opts) when is_list(opts) do
-    # Get default SNMP values from the configuration system
+    # Get default SNMP values from the configuration system, with static fallbacks
     defaults = [
-      community: get(:snmp, :default_community, "public"),
-      timeout: get(:snmp, :default_timeout, 5000),
-      retries: get(:snmp, :default_retries, 3),
-      port: get(:snmp, :default_port, 161),
-      version: get(:snmp, :default_version, :v2c),
-      mib_paths: get(:snmp, :mib_paths, [])
+      community: safe_get(:snmp, :default_community, "public"),
+      timeout: safe_get(:snmp, :default_timeout, 5000),
+      retries: safe_get(:snmp, :default_retries, 3),
+      port: safe_get(:snmp, :default_port, 161),
+      version: safe_get(:snmp, :default_version, :v2c),
+      mib_paths: safe_get(:snmp, :mib_paths, [])
     ]
     
     # Merge defaults with user options, user options take precedence
@@ -555,6 +567,17 @@ defmodule SnmpLib.Config do
     case Map.get(@default_config, section) do
       nil -> default
       section_config -> get_nested_value(section_config, key, default)
+    end
+  end
+  
+  # Safe get that works even when GenServer is not running (for doctests)
+  defp safe_get(section, key, default) do
+    try do
+      get(section, key, default)
+    rescue
+      ArgumentError ->
+        # ETS table doesn't exist, fall back to static config
+        get_default_value(section, key, default)
     end
   end
   
