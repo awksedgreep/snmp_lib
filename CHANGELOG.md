@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2025-01-06
+
+### Fixed
+
+- **Symbolic OID Resolution**: Fixed symbolic SNMP OID resolution in Manager module
+  - Fixed `normalize_oid` function to properly resolve symbolic names like "sysDescr.0" using MIB Registry
+  - Symbolic names now resolve to complete OIDs (e.g., "sysDescr.0" → [1, 3, 6, 1, 2, 1, 1, 1, 0]) instead of incomplete fallback [1, 3, 6, 1]
+  - Added MIB Registry integration with fallback to numeric string parsing
+  - Fixes SNMP simulator rejections due to incomplete OID resolution
+  - Maintains backward compatibility for existing numeric OID usage
+
 ## [0.2.9] - 2025-01-06
 
 ### Fixed
