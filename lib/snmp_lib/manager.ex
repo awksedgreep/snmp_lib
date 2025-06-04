@@ -449,22 +449,40 @@ defmodule SnmpLib.Manager do
   defp extract_get_result(%{pdu: %{error_status: error_status}}) when error_status != 0 do
     {:error, decode_error_status(error_status)}
   end
-  defp extract_get_result(%{pdu: %{varbinds: [{_oid, _type, value}]}}) do
-    case value do
+  defp extract_get_result(%{pdu: %{varbinds: [{_oid, type, value}]}}) do
+    # Check for SNMPv2c exception values in both type and value fields
+    case {type, value} do
+      # Exception values in type field (from simulator)
       {:no_such_object, _} -> {:error, :no_such_object}
       {:no_such_instance, _} -> {:error, :no_such_instance}
       {:end_of_mib_view, _} -> {:error, :end_of_mib_view}
+      
+      # Exception values in value field (standard format)
+      {_, {:no_such_object, _}} -> {:error, :no_such_object}
+      {_, {:no_such_instance, _}} -> {:error, :no_such_instance}
+      {_, {:end_of_mib_view, _}} -> {:error, :end_of_mib_view}
+      
+      # Normal value
       _ -> {:ok, value}
     end
   end
   defp extract_get_result(_), do: {:error, :invalid_response}
   
   defp extract_bulk_result(%{pdu: %{varbinds: varbinds}}) do
-    valid_varbinds = Enum.filter(varbinds, fn {_oid, _type, value} ->
-      case value do
+    valid_varbinds = Enum.filter(varbinds, fn {_oid, type, value} ->
+      # Check for SNMPv2c exception values in both type and value fields
+      case {type, value} do
+        # Exception values in type field (from simulator)
         {:no_such_object, _} -> false
         {:no_such_instance, _} -> false
         {:end_of_mib_view, _} -> false
+        
+        # Exception values in value field (standard format)
+        {_, {:no_such_object, _}} -> false
+        {_, {:no_such_instance, _}} -> false
+        {_, {:end_of_mib_view, _}} -> false
+        
+        # Valid varbind
         _ -> true
       end
     end)

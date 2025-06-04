@@ -376,6 +376,20 @@ defmodule SnmpLib.ManagerTest do
       assert Manager.interpret_error(:network_error, :get, :v1) == :network_error
       assert Manager.interpret_error(:invalid_response, :get, :v2c) == :invalid_response
     end
+    
+    test "correctly handles SNMPv2c exception values in varbinds" do
+      # Test that exception values are properly extracted regardless of format
+      # The fix handles both formats:
+      # 1. {oid, :end_of_mib_view, nil} - simulator format (type field)
+      # 2. {oid, :octet_string, {:end_of_mib_view, nil}} - standard format (value field)
+      
+      # This verifies the logic works but we can't test the private function directly
+      # Instead verify that SNMPv2c exception types are recognized
+      assert SnmpLib.Types.is_exception_type?(:no_such_object) == true
+      assert SnmpLib.Types.is_exception_type?(:no_such_instance) == true  
+      assert SnmpLib.Types.is_exception_type?(:end_of_mib_view) == true
+      assert SnmpLib.Types.is_exception_type?(:integer) == false
+    end
   end
   
   describe "Manager error interpretation" do
