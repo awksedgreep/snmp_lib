@@ -286,7 +286,8 @@ defmodule SnmpLib.Utils do
       "DE AD BE EF"
   """
   @spec format_hex(binary(), String.t()) :: String.t()
-  def format_hex(data, separator \\ ":") when is_binary(data) and is_binary(separator) do
+  def format_hex(data, separator \\ ":")
+  def format_hex(data, separator) when is_binary(data) and is_binary(separator) do
     data
     |> :binary.bin_to_list()
     |> Enum.map(&String.upcase(Integer.to_string(&1, 16) |> String.pad_leading(2, "0")))

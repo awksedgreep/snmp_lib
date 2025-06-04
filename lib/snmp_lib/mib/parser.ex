@@ -326,7 +326,7 @@ defmodule SnmpLib.MIB.Parser do
 
   # Default case for other identifiers that should be variables
   defp convert_single_token({token_type, value, line}) do
-    Logger.warn("Unknown token #{inspect({token_type, value, line})}")
+    Logger.warning("Unknown token #{inspect({token_type, value, line})}")
     {:variable, line, to_string(value)}
   end
 

@@ -95,6 +95,12 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest, line + 1, acc)
   end
 
+  # Skip comments (-- to end of line) - optimized binary matching
+  defp do_tokenize(<<"--", rest::binary>>, line, acc) do
+    rest_after_comment = skip_comment_binary(rest)
+    do_tokenize(rest_after_comment, line, acc)
+  end
+
   # Handle identifiers and keywords FIRST - most common in MIB files
   defp do_tokenize(<<c, _::binary>> = input, line, acc) 
       when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) do
@@ -108,6 +114,14 @@ defmodule SnmpLib.MIB.Lexer do
     {int_value, rest} = parse_integer_inline(input, 0)
     token = {:integer, int_value, line}
     do_tokenize(rest, line, [token | acc])
+  end
+
+  # Handle negative integers
+  defp do_tokenize(<<?-, c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
+    <<?-, rest::binary>> = input
+    {int_value, rest_after_int} = parse_integer_inline(rest, 0)
+    token = {:integer, -int_value, line}
+    do_tokenize(rest_after_int, line, [token | acc])
   end
   
   # Inlined integer parsing - faster than function calls
@@ -123,20 +137,6 @@ defmodule SnmpLib.MIB.Lexer do
     parse_name_inline(rest, <<acc::binary, c>>)
   end
   defp parse_name_inline(rest, acc), do: {acc, rest}
-
-  # Skip comments (-- to end of line) - optimized binary matching
-  defp do_tokenize(<<"--", rest::binary>>, line, acc) do
-    rest_after_comment = skip_comment_binary(rest)
-    do_tokenize(rest_after_comment, line, acc)
-  end
-
-  # Handle negative integers
-  defp do_tokenize(<<?-, c, _::binary>> = input, line, acc) when c >= ?0 and c <= ?9 do
-    <<?-, rest::binary>> = input
-    {int_value, rest_after_int} = parse_integer_inline(rest, 0)
-    token = {:integer, -int_value, line}
-    do_tokenize(rest_after_int, line, [token | acc])
-  end
 
   # Handle single minus as symbol (not negative number)
   defp do_tokenize(<<?-, rest::binary>>, line, acc) do
