@@ -4,7 +4,7 @@ defmodule SnmpLib.MixProject do
   def project do
     [
       app: :snmp_lib,
-      version: "0.2.3",
+      version: "0.2.5",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       compilers: [:yecc] ++ Mix.compilers(),
@@ -49,4 +49,18 @@ defmodule SnmpLib.MixProject do
       links: %{"GitHub" => "https://github.com/your_org/snmp_lib"}
     ]
   end
+
+  # # Release configuration
+  # defp releases do
+  #   [
+  #     snmp_lib: [
+  #       version: "0.2.5",
+  #       applications: [snmp_lib: :permanent],
+  #       steps: [:assemble, :tar],
+  #       strip_beams: Mix.env() == :prod,
+  #       include_executables_for: [:unix],
+  #       include_erts: true
+  #     ]
+  #   ]
+  # end
 end

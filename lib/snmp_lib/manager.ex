@@ -446,6 +446,9 @@ defmodule SnmpLib.Manager do
   end
   
   # Result extraction
+  defp extract_get_result(%{pdu: %{error_status: error_status}}) when error_status != 0 do
+    {:error, decode_error_status(error_status)}
+  end
   defp extract_get_result(%{pdu: %{varbinds: [{_oid, _type, value}]}}) do
     case value do
       {:no_such_object, _} -> {:error, :no_such_object}
@@ -453,9 +456,6 @@ defmodule SnmpLib.Manager do
       {:end_of_mib_view, _} -> {:error, :end_of_mib_view}
       _ -> {:ok, value}
     end
-  end
-  defp extract_get_result(%{pdu: %{error_status: error_status}}) when error_status != 0 do
-    {:error, decode_error_status(error_status)}
   end
   defp extract_get_result(_), do: {:error, :invalid_response}
   
