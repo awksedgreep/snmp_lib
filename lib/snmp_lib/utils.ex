@@ -450,6 +450,16 @@ defmodule SnmpLib.Utils do
     end
   end
   
+  def parse_target({a, b, c, d, e, f, g, h} = ipv6_tuple) when 
+      is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) and
+      is_integer(e) and is_integer(f) and is_integer(g) and is_integer(h) do
+    if valid_ipv6_tuple?(ipv6_tuple) do
+      {:ok, %{host: ipv6_tuple, port: 161}}
+    else
+      {:error, {:invalid_ipv6_tuple, ipv6_tuple}}
+    end
+  end
+  
   def parse_target(%{host: host, port: port}) when is_integer(port) do
     if port > 0 and port <= 65535 do
       case parse_host(host) do
@@ -538,27 +548,56 @@ defmodule SnmpLib.Utils do
   
   # Target parsing helpers
   defp parse_host_port_string(target_str) do
-    # Check if this looks like IPv6 first (contains :: or multiple colons)
-    if String.contains?(target_str, "::") or (target_str |> String.graphemes() |> Enum.count(&(&1 == ":"))) > 1 do
-      # Likely IPv6, treat as hostname without port
-      {target_str, nil}
-    else
-      # Handle regular host:port parsing
-      case String.split(target_str, ":", parts: 2) do
-        [host_str] -> 
-          {host_str, nil}
-        
-        [host_str, port_str] ->
-          # Check if host part looks like IPv4 or simple hostname first
-          if is_ipv4_or_simple_hostname?(host_str) do
-            # Now check if port is valid - if not, return error rather than treating as hostname
-            {host_str, port_str}
-          else
-            # Complex hostname with colons, treat as hostname without port
-            {target_str, nil}
-          end
-      end
+    cond do
+      # RFC 3986 bracket notation: [IPv6]:port
+      String.starts_with?(target_str, "[") ->
+        parse_bracket_notation(target_str)
+      
+      # Check if this looks like plain IPv6 (contains :: or multiple colons)
+      String.contains?(target_str, "::") or count_colons(target_str) > 1 ->
+        # Plain IPv6 address without port
+        {target_str, nil}
+      
+      # Standard host:port parsing for IPv4 and simple hostnames
+      true ->
+        case String.split(target_str, ":", parts: 2) do
+          [host_str] -> 
+            {host_str, nil}
+          
+          [host_str, port_str] ->
+            # Check if host part looks like IPv4 or simple hostname
+            if is_ipv4_or_simple_hostname?(host_str) do
+              {host_str, port_str}
+            else
+              # Complex hostname with colons, treat as hostname without port
+              {target_str, nil}
+            end
+        end
     end
+  end
+  
+  defp parse_bracket_notation("[" <> rest) do
+    case String.split(rest, "]:", parts: 2) do
+      [ipv6_addr, port_str] ->
+        # Valid [IPv6]:port format
+        {ipv6_addr, port_str}
+      
+      _ ->
+        # Check for [IPv6] without port
+        case String.split(rest, "]", parts: 2) do
+          [ipv6_addr, ""] ->
+            # Valid [IPv6] format without port
+            {ipv6_addr, nil}
+          
+          _ ->
+            # Invalid bracket notation, treat as hostname
+            {"[" <> rest, nil}
+        end
+    end
+  end
+  
+  defp count_colons(str) do
+    str |> String.graphemes() |> Enum.count(&(&1 == ":"))
   end
   
   defp parse_host_with_port(host_str, port) do
@@ -573,9 +612,9 @@ defmodule SnmpLib.Utils do
       {:ok, {a, b, c, d}} when is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) -> 
         # IPv4 address
         {:ok, {a, b, c, d}}
-      {:ok, _ipv6_tuple} -> 
-        # IPv6 address - treat as hostname for now to maintain consistency
-        {:ok, host}
+      {:ok, ipv6_tuple} when tuple_size(ipv6_tuple) == 8 -> 
+        # IPv6 address - return as tuple for proper socket handling
+        {:ok, ipv6_tuple}
       {:error, :einval} -> 
         # Not an IP, treat as hostname
         {:ok, host}
@@ -609,6 +648,20 @@ defmodule SnmpLib.Utils do
     d >= 0 and d <= 255
   end
   defp valid_ip_tuple?(_), do: false
+  
+  defp valid_ipv6_tuple?({a, b, c, d, e, f, g, h}) when 
+      is_integer(a) and is_integer(b) and is_integer(c) and is_integer(d) and
+      is_integer(e) and is_integer(f) and is_integer(g) and is_integer(h) do
+    a >= 0 and a <= 65535 and
+    b >= 0 and b <= 65535 and
+    c >= 0 and c <= 65535 and
+    d >= 0 and d <= 65535 and
+    e >= 0 and e <= 65535 and
+    f >= 0 and f <= 65535 and
+    g >= 0 and g <= 65535 and
+    h >= 0 and h <= 65535
+  end
+  defp valid_ipv6_tuple?(_), do: false
   
   defp is_ipv4_or_simple_hostname?(host_str) do
     # Check if it looks like IPv4 (has 3 dots and only digits/dots)

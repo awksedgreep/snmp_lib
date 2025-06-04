@@ -342,12 +342,22 @@ defmodule SnmpLib.Manager do
     community = opts[:community] || @default_community
     version = opts[:version] || @default_version
     timeout = opts[:timeout] || @default_timeout
-    default_port = opts[:port] || @default_port
+    port_option = opts[:port] || @default_port
     
-    # Parse target to handle host:port strings properly
+    # Parse target to handle both host:port strings and :port option
     {parsed_host, parsed_port} = case SnmpLib.Utils.parse_target(host) do
-      {:ok, %{host: h, port: p}} -> {h, p}
-      {:error, _} -> {host, default_port}  # Fall back to original host and default port
+      {:ok, %{host: h, port: p}} -> 
+        # Check if host contained a port specification
+        if host_contains_port?(host) do
+          # Host:port format - use parsed port (backward compatibility)
+          {h, p}
+        else
+          # Host without port - use :port option
+          {h, port_option}
+        end
+      {:error, _} -> 
+        # Parse failed - use original host and :port option
+        {host, port_option}
     end
     
     message = SnmpLib.PDU.build_message(pdu, community, version)
@@ -468,6 +478,43 @@ defmodule SnmpLib.Manager do
     ])
     |> Keyword.merge(opts)
   end
+  
+  # Helper to determine if host string contains port specification
+  defp host_contains_port?(host) when is_binary(host) do
+    cond do
+      # RFC 3986 bracket notation: [IPv6]:port
+      String.starts_with?(host, "[") and String.contains?(host, "]:") ->
+        # Check if it's valid [addr]:port format
+        case String.split(host, "]:", parts: 2) do
+          [_ipv6_part, port_part] ->
+            case Integer.parse(port_part) do
+              {port, ""} when port > 0 and port <= 65535 -> true
+              _ -> false
+            end
+          _ -> false
+        end
+      
+      # Plain IPv6 addresses (contain :: or multiple colons) - no port embedded
+      String.contains?(host, "::") -> false
+      (host |> String.graphemes() |> Enum.count(&(&1 == ":"))) > 1 -> false
+      
+      # IPv4 or simple hostname with port
+      String.contains?(host, ":") -> 
+        # Single colon - check if part after colon looks like a port number
+        case String.split(host, ":", parts: 2) do
+          [_host_part, port_part] ->
+            case Integer.parse(port_part) do
+              {port, ""} when port > 0 and port <= 65535 -> true
+              _ -> false
+            end
+          _ -> false
+        end
+      
+      # No colon at all
+      true -> false
+    end
+  end
+  defp host_contains_port?(_), do: false
   
   # Check if all results failed with the same network-related error
   defp check_for_global_failure(results) do

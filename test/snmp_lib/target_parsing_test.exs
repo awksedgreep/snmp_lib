@@ -104,10 +104,79 @@ defmodule SnmpLib.TargetParsingTest do
         Utils.parse_target(%{host: "192.168.1.1", port: -5})
     end
 
-    test "handles IPv6-like strings as hostnames" do
-      # IPv6 addresses are not parsed as IP tuples, they remain as hostnames
-      assert {:ok, %{host: "::1", port: 161}} = Utils.parse_target("::1")
-      assert {:ok, %{host: "2001:db8::1", port: 161}} = Utils.parse_target("2001:db8::1")
+    test "handles plain IPv6 addresses correctly" do
+      # Plain IPv6 addresses should be parsed as IP tuples when valid
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("::1")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("2001:db8::1")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("fe80::1234:5678:9abc:def0")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      # Full IPv6 address
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("2001:0db8:85a3:0000:0000:8a2e:0370:7334")
+      assert tuple_size(ipv6_tuple) == 8
+    end
+    
+    test "handles IPv6 bracket notation correctly" do
+      # RFC 3986 bracket notation: [addr]:port
+      assert {:ok, %{host: ipv6_tuple, port: 1161}} = Utils.parse_target("[::1]:1161")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      assert {:ok, %{host: ipv6_tuple, port: 162}} = Utils.parse_target("[2001:db8::1]:162")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      assert {:ok, %{host: ipv6_tuple, port: 2001}} = Utils.parse_target("[fe80::1234:5678:9abc:def0]:2001")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      # Full IPv6 with port
+      assert {:ok, %{host: ipv6_tuple, port: 8080}} = Utils.parse_target("[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:8080")
+      assert tuple_size(ipv6_tuple) == 8
+    end
+    
+    test "handles IPv6 bracket notation without port" do
+      # [addr] format without port should use default 161
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("[::1]")
+      assert tuple_size(ipv6_tuple) == 8
+      
+      assert {:ok, %{host: ipv6_tuple, port: 161}} = Utils.parse_target("[2001:db8::1]")
+      assert tuple_size(ipv6_tuple) == 8
+    end
+    
+    test "handles malformed IPv6 bracket notation" do
+      # Malformed bracket notation should be treated as hostnames
+      assert {:ok, %{host: "[::1", port: 161}} = Utils.parse_target("[::1")  # Missing closing bracket
+      assert {:ok, %{host: "::1]", port: 161}} = Utils.parse_target("::1]")  # Missing opening bracket
+      assert {:ok, %{host: "[::1:abc", port: 161}} = Utils.parse_target("[::1:abc")  # Invalid format
+      
+      # Invalid ports in bracket notation
+      assert {:error, {:invalid_port, "99999"}} = Utils.parse_target("[::1]:99999")
+      assert {:error, {:invalid_port_format, "abc"}} = Utils.parse_target("[::1]:abc")
+    end
+    
+    test "parses IPv6 tuples correctly" do
+      # IPv6 tuples should work like IPv4 tuples
+      ipv6_tuple = {8193, 3512, 0, 0, 0, 0, 0, 1}  # 2001:db8::1
+      assert {:ok, %{host: ^ipv6_tuple, port: 161}} = Utils.parse_target(ipv6_tuple)
+      
+      # Localhost IPv6
+      localhost_ipv6 = {0, 0, 0, 0, 0, 0, 0, 1}  # ::1
+      assert {:ok, %{host: ^localhost_ipv6, port: 161}} = Utils.parse_target(localhost_ipv6)
+    end
+    
+    test "validates IPv6 tuple ranges" do
+      # Valid IPv6 tuple ranges (0-65535 for each segment)
+      valid_ipv6 = {0, 0, 0, 0, 0, 0, 0, 65535}
+      assert {:ok, %{host: ^valid_ipv6, port: 161}} = Utils.parse_target(valid_ipv6)
+      
+      # Invalid IPv6 tuple ranges
+      assert {:error, {:invalid_ipv6_tuple, {65536, 0, 0, 0, 0, 0, 0, 0}}} = 
+        Utils.parse_target({65536, 0, 0, 0, 0, 0, 0, 0})
+      
+      assert {:error, {:invalid_ipv6_tuple, {0, 0, 0, 0, 0, 0, 0, -1}}} = 
+        Utils.parse_target({0, 0, 0, 0, 0, 0, 0, -1})
     end
 
     test "handles complex hostnames" do

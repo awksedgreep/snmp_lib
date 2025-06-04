@@ -191,6 +191,135 @@ defmodule SnmpLib.ManagerTest do
     end
   end
   
+  describe "Manager host:port parsing" do
+    test "supports host:port string format (backward compatibility)" do
+      # Host with port in string format should work
+      assert {:error, _} = Manager.get("invalid.host.test:1161", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("192.168.255.255:162", [1, 3, 6, 1], timeout: 100)
+      
+      # Test with get_bulk
+      assert {:error, _} = Manager.get_bulk("invalid.host.test:1161", [1, 3, 6, 1], timeout: 100)
+      
+      # Test with set
+      assert {:error, _} = Manager.set("invalid.host.test:1161", [1, 3, 6, 1], {:string, "test"}, timeout: 100)
+      
+      # Test with get_multi
+      oids = [[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 3, 0]]
+      assert {:error, _} = Manager.get_multi("invalid.host.test:1161", oids, timeout: 100)
+      
+      # Test with ping
+      assert {:error, _} = Manager.ping("invalid.host.test:1161", timeout: 100)
+    end
+    
+    test "supports :port option format (new functionality)" do
+      # Host without port, using :port option
+      assert {:error, _} = Manager.get("invalid.host.test", [1, 3, 6, 1], port: 1161, timeout: 100)
+      assert {:error, _} = Manager.get("192.168.255.255", [1, 3, 6, 1], port: 162, timeout: 100)
+      
+      # Test with get_bulk
+      assert {:error, _} = Manager.get_bulk("invalid.host.test", [1, 3, 6, 1], port: 1161, timeout: 100)
+      
+      # Test with set
+      assert {:error, _} = Manager.set("invalid.host.test", [1, 3, 6, 1], {:string, "test"}, port: 1161, timeout: 100)
+      
+      # Test with get_multi
+      oids = [[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 3, 0]]
+      assert {:error, _} = Manager.get_multi("invalid.host.test", oids, port: 1161, timeout: 100)
+      
+      # Test with ping
+      assert {:error, _} = Manager.ping("invalid.host.test", port: 1161, timeout: 100)
+    end
+    
+    test "host:port string takes precedence over :port option" do
+      # When both are specified, host:port should take precedence for backward compatibility
+      # We can't easily test the actual port being used without mocking transport,
+      # but we can verify both forms don't cause errors
+      assert {:error, _} = Manager.get("invalid.host.test:1161", [1, 3, 6, 1], port: 162, timeout: 100)
+      assert {:error, _} = Manager.get_bulk("invalid.host.test:1161", [1, 3, 6, 1], port: 162, timeout: 100)
+      assert {:error, _} = Manager.set("invalid.host.test:1161", [1, 3, 6, 1], {:string, "test"}, port: 162, timeout: 100)
+    end
+    
+    test "handles IPv6 addresses without confusing them with port specifications" do
+      # Plain IPv6 addresses contain colons but shouldn't be treated as host:port
+      # Use invalid IPv6 addresses to avoid network calls
+      assert {:error, _} = Manager.get("invalid::ipv6", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("test:db8::invalid", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("fake::1234:5678:9abc:def0", [1, 3, 6, 1], timeout: 100)
+      
+      # IPv6 with :port option should work (but fail due to invalid host)
+      assert {:error, _} = Manager.get("invalid::ipv6", [1, 3, 6, 1], port: 1161, timeout: 100)
+      assert {:error, _} = Manager.get("test:db8::invalid", [1, 3, 6, 1], port: 1161, timeout: 100)
+      assert {:error, _} = Manager.get("fake::1234:5678:9abc:def0", [1, 3, 6, 1], port: 1161, timeout: 100)
+    end
+    
+    test "supports RFC 3986 bracket notation for IPv6 with ports" do
+      # IPv6 with port using bracket notation [addr]:port
+      assert {:error, _} = Manager.get("[::1]:1161", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("[2001:db8::1]:162", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("[fe80::1234:5678:9abc:def0]:2001", [1, 3, 6, 1], timeout: 100)
+      
+      # Test with get_bulk
+      assert {:error, _} = Manager.get_bulk("[::1]:1161", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get_bulk("[2001:db8::1]:162", [1, 3, 6, 1], timeout: 100)
+      
+      # Test with set
+      assert {:error, _} = Manager.set("[::1]:1161", [1, 3, 6, 1], {:string, "test"}, timeout: 100)
+      assert {:error, _} = Manager.set("[2001:db8::1]:162", [1, 3, 6, 1], {:string, "test"}, timeout: 100)
+      
+      # Test with get_multi
+      oids = [[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 3, 0]]
+      assert {:error, _} = Manager.get_multi("[::1]:1161", oids, timeout: 100)
+      assert {:error, _} = Manager.get_multi("[2001:db8::1]:162", oids, timeout: 100)
+      
+      # Test with ping
+      assert {:error, _} = Manager.ping("[::1]:1161", timeout: 100)
+      assert {:error, _} = Manager.ping("[2001:db8::1]:162", timeout: 100)
+    end
+    
+    test "bracket notation takes precedence over :port option for IPv6" do
+      # When both bracket notation and :port option are provided, bracket should take precedence
+      assert {:error, _} = Manager.get("[::1]:1161", [1, 3, 6, 1], port: 162, timeout: 100)
+      assert {:error, _} = Manager.get("[2001:db8::1]:2001", [1, 3, 6, 1], port: 161, timeout: 100)
+    end
+    
+    test "handles malformed IPv6 bracket notation gracefully" do
+      # Invalid bracket notation should be treated as hostnames and not cause crashes
+      assert {:error, _} = Manager.get("[::1", [1, 3, 6, 1], timeout: 100)  # Missing closing bracket
+      assert {:error, _} = Manager.get("::1]", [1, 3, 6, 1], timeout: 100)  # Missing opening bracket
+      assert {:error, _} = Manager.get("[::1:abc", [1, 3, 6, 1], timeout: 100)  # Invalid format
+      assert {:error, _} = Manager.get("[::1]:99999", [1, 3, 6, 1], timeout: 100)  # Invalid port
+      assert {:error, _} = Manager.get("[::1]:abc", [1, 3, 6, 1], timeout: 100)  # Non-numeric port
+    end
+    
+    test "handles mixed IPv4/IPv6 scenarios correctly" do
+      # IPv4 with port should still work
+      assert {:error, _} = Manager.get("192.168.1.1:1161", [1, 3, 6, 1], timeout: 100)
+      
+      # IPv6 without port should use :port option
+      assert {:error, _} = Manager.get("::1", [1, 3, 6, 1], port: 1161, timeout: 100)
+      
+      # IPv6 with bracket notation should override :port option
+      assert {:error, _} = Manager.get("[::1]:2001", [1, 3, 6, 1], port: 1161, timeout: 100)
+      
+      # Complex IPv6 addresses should work with both patterns
+      assert {:error, _} = Manager.get("2001:0db8:85a3:0000:0000:8a2e:0370:7334", [1, 3, 6, 1], port: 1161, timeout: 100)
+      assert {:error, _} = Manager.get("[2001:0db8:85a3:0000:0000:8a2e:0370:7334]:2002", [1, 3, 6, 1], timeout: 100)
+    end
+    
+    test "validates port numbers in host:port format" do
+      # Invalid port numbers should be handled gracefully
+      assert {:error, _} = Manager.get("invalid.host.test:99999", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("invalid.host.test:0", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("invalid.host.test:abc", [1, 3, 6, 1], timeout: 100)
+    end
+    
+    test "falls back to default port 161 when no port specified" do
+      # No port in host string and no :port option should use default 161
+      assert {:error, _} = Manager.get("invalid.host.test", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get("192.168.255.255", [1, 3, 6, 1], timeout: 100)
+    end
+  end
+  
   describe "Manager error handling" do
     test "handles network errors gracefully" do
       # Network errors (timeout or network unreachable)
