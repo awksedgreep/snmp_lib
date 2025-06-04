@@ -270,6 +270,55 @@ defmodule SnmpLib.Manager do
   end
   
   @doc """
+  Interprets SNMP errors with enhanced semantics for common cases.
+  
+  Provides more specific error interpretation when generic errors like `:gen_err`
+  are returned by devices that should return more specific SNMP error codes.
+  
+  ## Parameters
+  
+  - `error`: The original error returned by SNMP operations
+  - `operation`: The SNMP operation type (`:get`, `:set`, `:get_bulk`)
+  - `version`: SNMP version (`:v1`, `:v2c`, `:v3`)
+  
+  ## Returns
+  
+  More specific error atom when possible, otherwise the original error.
+  
+  ## Examples
+  
+      # Interpret genErr for GET operations
+      iex> SnmpLib.Manager.interpret_error(:gen_err, :get, :v2c)
+      :no_such_object
+      
+      iex> SnmpLib.Manager.interpret_error(:gen_err, :get, :v1)
+      :no_such_name
+      
+      iex> SnmpLib.Manager.interpret_error(:too_big, :get, :v2c)
+      :too_big
+  """
+  @spec interpret_error(atom(), atom(), atom()) :: atom()
+  def interpret_error(:gen_err, :get, :v1) do
+    # In SNMPv1, genErr for GET operations commonly means OID doesn't exist
+    :no_such_name
+  end
+  
+  def interpret_error(:gen_err, :get, version) when version in [:v2c, :v2, :v3] do
+    # In SNMPv2c+, genErr for GET operations commonly means object doesn't exist
+    :no_such_object
+  end
+  
+  def interpret_error(:gen_err, :get_bulk, version) when version in [:v2c, :v2, :v3] do
+    # For bulk operations, genErr often indicates end of MIB or missing objects
+    :no_such_object
+  end
+  
+  def interpret_error(error, _operation, _version) do
+    # Return original error for all other cases
+    error
+  end
+
+  @doc """
   Checks if a host is reachable via SNMP by performing a basic GET operation.
   
   Useful for device discovery and health checking. Attempts to retrieve

@@ -338,6 +338,42 @@ defmodule SnmpLib.ManagerTest do
     end
   end
   
+  describe "Manager error interpretation" do
+    test "interpret_error provides better semantics for genErr" do
+      # SNMPv1 GET operations
+      assert Manager.interpret_error(:gen_err, :get, :v1) == :no_such_name
+      
+      # SNMPv2c+ GET operations  
+      assert Manager.interpret_error(:gen_err, :get, :v2c) == :no_such_object
+      assert Manager.interpret_error(:gen_err, :get, :v2) == :no_such_object
+      assert Manager.interpret_error(:gen_err, :get, :v3) == :no_such_object
+      
+      # SNMPv2c+ GETBULK operations
+      assert Manager.interpret_error(:gen_err, :get_bulk, :v2c) == :no_such_object
+      assert Manager.interpret_error(:gen_err, :get_bulk, :v2) == :no_such_object
+      
+      # Other errors pass through unchanged
+      assert Manager.interpret_error(:too_big, :get, :v2c) == :too_big
+      assert Manager.interpret_error(:no_such_name, :get, :v1) == :no_such_name
+      assert Manager.interpret_error(:bad_value, :set, :v2c) == :bad_value
+      
+      # SET operations with genErr remain as genErr
+      assert Manager.interpret_error(:gen_err, :set, :v2c) == :gen_err
+    end
+    
+    test "interpret_error handles edge cases" do
+      # Unknown operation types
+      assert Manager.interpret_error(:gen_err, :unknown_op, :v2c) == :gen_err
+      
+      # Unknown SNMP versions
+      assert Manager.interpret_error(:gen_err, :get, :unknown_version) == :gen_err
+      
+      # nil or invalid inputs
+      assert Manager.interpret_error(nil, :get, :v2c) == nil
+      assert Manager.interpret_error(:gen_err, nil, :v2c) == :gen_err
+    end
+  end
+  
   describe "Manager integration" do
     test "integrates with existing SnmpLib modules" do
       # Verify Manager uses other SnmpLib modules correctly
