@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.9] - 2025-01-06
+
+### Fixed
+
+- **Critical Bug Fix**: Fixed SNMP response corruption in Manager module
+  - Resolved issue where successful SNMP responses (error_status: 0) were being corrupted to generic errors (error_status: 5)
+  - Fixed incorrect pattern matching in `send_and_receive` function that was passing tuple `{data, address, port}` to PDU decoder instead of just `data`
+  - Enhanced debug logging throughout SNMP pipeline for better troubleshooting
+  - All SNMP operations now correctly preserve error status codes and varbind data
+
+### Enhanced
+
+- **Debug Logging**: Added comprehensive debug logging to Manager module
+  - Detailed logging for PDU processing pipeline
+  - Transport layer operation logging
+  - Result extraction logging for better troubleshooting
+
 ## [0.1.0] - 2025-01-06
 
 ### Added

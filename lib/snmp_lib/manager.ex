@@ -117,12 +117,28 @@ defmodule SnmpLib.Manager do
     opts = merge_default_opts(opts)
     normalized_oid = normalize_oid(oid)
     
-    with {:ok, socket} <- create_socket(opts),
-         {:ok, response} <- perform_get_operation(socket, host, normalized_oid, opts),
-         :ok <- close_socket(socket) do
-      extract_get_result(response)
+    Logger.debug("Starting GET operation: host=#{inspect(host)}, oid=#{inspect(normalized_oid)}")
+    
+    with {:ok, socket} <- create_socket(opts) do
+      Logger.debug("Socket created successfully")
+      
+      case perform_get_operation(socket, host, normalized_oid, opts) do
+        {:ok, response} ->
+          Logger.debug("GET operation completed, extracting result")
+          :ok = close_socket(socket)
+          result = extract_get_result(response)
+          Logger.debug("Final GET result: #{inspect(result)}")
+          result
+          
+        {:error, reason} = error ->
+          Logger.debug("GET operation failed: #{inspect(reason)}")
+          :ok = close_socket(socket)
+          error
+      end
     else
-      {:error, reason} -> {:error, reason}
+      {:error, reason} = socket_error ->
+        Logger.debug("Socket creation failed: #{inspect(reason)}")
+        socket_error
     end
   end
   
@@ -410,23 +426,59 @@ defmodule SnmpLib.Manager do
     end
     
     message = SnmpLib.PDU.build_message(pdu, community, version)
+    Logger.debug("Built SNMP message: #{inspect(message)}")
     
-    with {:ok, packet} <- SnmpLib.PDU.encode_message(message),
-         {:ok, response_packet} <- send_and_receive(socket, parsed_host, parsed_port, packet, timeout),
-         {:ok, response_message} <- SnmpLib.PDU.decode_message(response_packet) do
-      {:ok, response_message}
+    with {:ok, packet} <- SnmpLib.PDU.encode_message(message) do
+      Logger.debug("Encoded PDU packet for transmission")
+      
+      case send_and_receive(socket, parsed_host, parsed_port, packet, timeout) do
+        {:ok, response_packet} ->
+          Logger.debug("Received response packet from network")
+          
+          case SnmpLib.PDU.decode_message(response_packet) do
+            {:ok, response_message} ->
+              Logger.debug("Decoded response message: #{inspect(response_message)}")
+              {:ok, response_message}
+            
+            {:error, decode_reason} = decode_error ->
+              Logger.error("PDU decode failed: #{inspect(decode_reason)}")
+              decode_error
+          end
+          
+        {:error, network_reason} = network_error ->
+          Logger.error("Network operation failed: #{inspect(network_reason)}")
+          network_error
+      end
     else
-      {:error, reason} -> {:error, reason}
+      {:error, encode_reason} = encode_error ->
+        Logger.error("PDU encode failed: #{inspect(encode_reason)}")
+        encode_error
     end
   end
   
   defp send_and_receive(socket, host, port, packet, timeout) do
-    with :ok <- SnmpLib.Transport.send_packet(socket, host, port, packet),
-         {:ok, response_packet} <- SnmpLib.Transport.receive_packet(socket, timeout) do
-      {:ok, response_packet}
+    Logger.debug("Sending SNMP packet to #{inspect(host)}:#{port}")
+    
+    with :ok <- SnmpLib.Transport.send_packet(socket, host, port, packet) do
+      Logger.debug("Packet sent successfully, waiting for response (timeout: #{timeout}ms)")
+      
+      case SnmpLib.Transport.receive_packet(socket, timeout) do
+        {:ok, {response_packet, _from_addr, _from_port}} ->
+          Logger.debug("Received response packet: #{byte_size(response_packet)} bytes")
+          {:ok, response_packet}
+          
+        {:error, :timeout} = timeout_error ->
+          Logger.debug("Transport timeout after #{timeout}ms")
+          timeout_error
+          
+        {:error, reason} ->
+          Logger.debug("Transport error: #{inspect(reason)}")
+          {:error, {:network_error, reason}}
+      end
     else
-      {:error, :timeout} -> {:error, :timeout}
-      {:error, reason} -> {:error, {:network_error, reason}}
+      {:error, reason} ->
+        Logger.debug("Send packet failed: #{inspect(reason)}")
+        {:error, {:network_error, reason}}
     end
   end
   
@@ -446,27 +498,49 @@ defmodule SnmpLib.Manager do
   end
   
   # Result extraction
-  defp extract_get_result(%{pdu: %{error_status: error_status}}) when error_status != 0 do
+  defp extract_get_result(%{pdu: %{error_status: error_status}} = response) when error_status != 0 do
+    Logger.debug("Extracting error result - error_status: #{error_status}")
+    Logger.debug("Full response PDU: #{inspect(response.pdu)}")
     {:error, decode_error_status(error_status)}
   end
-  defp extract_get_result(%{pdu: %{varbinds: [{_oid, type, value}]}}) do
+  defp extract_get_result(%{pdu: %{varbinds: [{_oid, type, value}]}} = response) do
+    Logger.debug("Extracting successful result - PDU: #{inspect(response.pdu)}")
+    Logger.debug("Varbind details - type: #{inspect(type)}, value: #{inspect(value)}")
+    
     # Check for SNMPv2c exception values in both type and value fields
     case {type, value} do
       # Exception values in type field (from simulator)
-      {:no_such_object, _} -> {:error, :no_such_object}
-      {:no_such_instance, _} -> {:error, :no_such_instance}
-      {:end_of_mib_view, _} -> {:error, :end_of_mib_view}
+      {:no_such_object, _} -> 
+        Logger.debug("Found exception in type field: no_such_object")
+        {:error, :no_such_object}
+      {:no_such_instance, _} -> 
+        Logger.debug("Found exception in type field: no_such_instance")
+        {:error, :no_such_instance}
+      {:end_of_mib_view, _} -> 
+        Logger.debug("Found exception in type field: end_of_mib_view")
+        {:error, :end_of_mib_view}
       
       # Exception values in value field (standard format)
-      {_, {:no_such_object, _}} -> {:error, :no_such_object}
-      {_, {:no_such_instance, _}} -> {:error, :no_such_instance}
-      {_, {:end_of_mib_view, _}} -> {:error, :end_of_mib_view}
+      {_, {:no_such_object, _}} -> 
+        Logger.debug("Found exception in value field: no_such_object")
+        {:error, :no_such_object}
+      {_, {:no_such_instance, _}} -> 
+        Logger.debug("Found exception in value field: no_such_instance")
+        {:error, :no_such_instance}
+      {_, {:end_of_mib_view, _}} -> 
+        Logger.debug("Found exception in value field: end_of_mib_view")
+        {:error, :end_of_mib_view}
       
       # Normal value
-      _ -> {:ok, value}
+      _ -> 
+        Logger.debug("Returning successful value: #{inspect(value)}")
+        {:ok, value}
     end
   end
-  defp extract_get_result(_), do: {:error, :invalid_response}
+  defp extract_get_result(response) do
+    Logger.error("Invalid response format: #{inspect(response)}")
+    {:error, :invalid_response}
+  end
   
   defp extract_bulk_result(%{pdu: %{varbinds: varbinds}}) do
     valid_varbinds = Enum.filter(varbinds, fn {_oid, type, value} ->
