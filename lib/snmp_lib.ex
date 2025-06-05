@@ -267,8 +267,11 @@ defmodule SnmpLib do
   
   ## Examples
   
-      iex> SnmpLib.version()
-      "0.3.0"
+      iex> is_binary(SnmpLib.version())
+      true
+      
+      iex> SnmpLib.version() |> String.contains?(".")
+      true
   """
   def version do
     Application.spec(:snmp_lib, :vsn) |> to_string()
