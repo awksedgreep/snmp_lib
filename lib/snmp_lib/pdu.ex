@@ -98,6 +98,14 @@ defmodule SnmpLib.PDU do
   @type snmp_value :: any()
   @type varbind :: {oid(), snmp_value()} | {oid(), atom(), snmp_value()}
 
+  # Error status code accessors
+  def no_error, do: @no_error
+  def too_big, do: @too_big
+  def no_such_name, do: @no_such_name
+  def bad_value, do: @bad_value
+  def read_only, do: @read_only
+  def gen_err, do: @gen_err
+
   @type pdu :: %{
     type: pdu_type(),
     request_id: non_neg_integer(),

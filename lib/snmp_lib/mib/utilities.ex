@@ -273,7 +273,7 @@ defmodule SnmpLib.MIB.Utilities do
 
   defp resolve_single_oid(name, oid_table) do
     case Map.get(oid_table, name) do
-      %{status: :resolved} = entry ->
+      %{status: :resolved} = _entry ->
         {:ok, oid_table}
       %{status: :unresolved, oid: symbolic_oid} = entry ->
         case resolve_symbolic_oid(symbolic_oid, oid_table) do
@@ -307,7 +307,7 @@ defmodule SnmpLib.MIB.Utilities do
     end
   end
 
-  defp resolve_oid_element(%{name: name, value: value}, _oid_table) when is_integer(value) do
+  defp resolve_oid_element(%{name: _name, value: value}, _oid_table) when is_integer(value) do
     {:ok, value}
   end
   defp resolve_oid_element(%{name: name}, oid_table) do

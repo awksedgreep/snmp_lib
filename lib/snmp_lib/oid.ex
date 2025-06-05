@@ -218,6 +218,26 @@ defmodule SnmpLib.OID do
   def get_children(_, _), do: []
 
   @doc """
+  Get standard SNMP OID prefixes.
+  
+  ## Examples
+  
+      iex> SnmpLib.OID.standard_prefix(:internet)
+      [1, 3, 6, 1]
+      
+      iex> SnmpLib.OID.standard_prefix(:mgmt)
+      [1, 3, 6, 1, 2]
+  """
+  @spec standard_prefix(atom()) :: oid() | nil
+  def standard_prefix(:internet), do: @iso_org_dod_internet
+  def standard_prefix(:mgmt), do: @mgmt
+  def standard_prefix(:mib_2), do: @mib_2
+  def standard_prefix(:enterprises), do: @enterprises
+  def standard_prefix(:experimental), do: @experimental
+  def standard_prefix(:private), do: @private
+  def standard_prefix(_), do: nil
+
+  @doc """
   Gets the next OID in lexicographic order from a given set.
   
   ## Parameters

@@ -62,7 +62,7 @@ defmodule SnmpLib.MIB.Error do
       "Error at line 42, column 10: Syntax error"
   """
   @spec format(t(), keyword()) :: binary()
-  def format(%__MODULE__{} = error, opts \\ []) do
+  def format(%__MODULE__{} = error, _opts \\ []) do
     location = format_location(error)
     suggestions = format_suggestions(error.suggestions)
     

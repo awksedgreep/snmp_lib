@@ -50,13 +50,12 @@ defmodule SnmpLib.MIB.Lexer do
     "INTERSECTION" => :intersection, "UNION" => :union, "ALL" => :all, "ENCODED" => :encoded
   }
   
-  @reserved_words MapSet.new(Map.keys(@reserved_words_map))
 
   @doc """
   Tokenize MIB content following Erlang snmpc_tok.erl exactly.
   Returns {:ok, tokens} or {:error, reason}
   """
-  def tokenize(input, opts \\ []) when is_binary(input) do
+  def tokenize(input, _opts \\ []) when is_binary(input) do
     try do
       # Handle encoding issues like Erlang snmpc_misc does
       case validate_encoding(input) do
@@ -124,48 +123,6 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest_after_int, line, [token | acc])
   end
   
-  # Inlined integer parsing - faster than function calls
-  defp parse_integer_inline(<<c, rest::binary>>, acc) when c >= ?0 and c <= ?9 do
-    parse_integer_inline(rest, acc * 10 + (c - ?0))
-  end
-  defp parse_integer_inline(rest, acc), do: {acc, rest}
-  
-  # Inlined name parsing - faster than function calls for identifiers/keywords
-  defp parse_name_inline(<<c, rest::binary>>, acc) 
-      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or 
-           (c >= ?0 and c <= ?9) or c == ?- or c == ?_ do
-    parse_name_inline(rest, <<acc::binary, c>>)
-  end
-  defp parse_name_inline(rest, acc), do: {acc, rest}
-
-  # Handle single minus as symbol (not negative number)
-  defp do_tokenize(<<?-, rest::binary>>, line, acc) do
-    token = {:symbol, :minus, line}
-    do_tokenize(rest, line, [token | acc])
-  end
-
-  # Handle string literals - optimized binary collection
-  defp do_tokenize(<<?\", rest::binary>>, line, acc) do
-    case collect_string_binary(rest, <<>>) do
-      {string_value, rest_after_string} ->
-        token = {:string, string_value, line}
-        do_tokenize(rest_after_string, line, [token | acc])
-      {:error, reason} ->
-        throw({:error, reason})
-    end
-  end
-
-  # Handle quoted literals
-  defp do_tokenize(<<?\', rest::binary>>, line, acc) do
-    case collect_quote_binary(rest, <<>>) do
-      {quote_value, rest_after_quote} ->
-        token = {:quote, quote_value, line}
-        do_tokenize(rest_after_quote, line, [token | acc])
-      {:error, reason} ->
-        throw({:error, reason})
-    end
-  end
-
   # Handle multi-character symbols
   defp do_tokenize(<<"::=", rest::binary>>, line, acc) do
     token = {:symbol, :assign, line}
@@ -254,6 +211,12 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest, line, [token | acc])
   end
 
+  # Handle single minus as symbol (not negative number)
+  defp do_tokenize(<<?-, rest::binary>>, line, acc) do
+    token = {:symbol, :minus, line}
+    do_tokenize(rest, line, [token | acc])
+  end
+
   defp do_tokenize(<<"<", rest::binary>>, line, acc) do
     token = {:symbol, :less_than, line}
     do_tokenize(rest, line, [token | acc])
@@ -264,11 +227,41 @@ defmodule SnmpLib.MIB.Lexer do
     do_tokenize(rest, line, [token | acc])
   end
 
+  # Handle string literals - optimized binary collection
+  defp do_tokenize(<<?\", rest::binary>>, line, acc) do
+    {string_value, rest_after_string} = collect_string_binary(rest, <<>>)
+    token = {:string, string_value, line}
+    do_tokenize(rest_after_string, line, [token | acc])
+  end
+
+  # Handle quoted literals
+  defp do_tokenize(<<?\', rest::binary>>, line, acc) do
+    {quote_value, rest_after_quote} = collect_quote_binary(rest, <<>>)
+    token = {:quote, quote_value, line}
+    do_tokenize(rest_after_quote, line, [token | acc])
+  end
+
   # Handle any other single character as a special symbol (safer than atom)
   defp do_tokenize(<<ch, rest::binary>>, line, acc) do
     token = {:unknown_char, ch, line}
     do_tokenize(rest, line, [token | acc])
   end
+
+  # Helper functions for parsing
+  
+  # Inlined integer parsing - faster than function calls
+  defp parse_integer_inline(<<c, rest::binary>>, acc) when c >= ?0 and c <= ?9 do
+    parse_integer_inline(rest, acc * 10 + (c - ?0))
+  end
+  defp parse_integer_inline(rest, acc), do: {acc, rest}
+  
+  # Inlined name parsing - faster than function calls for identifiers/keywords
+  defp parse_name_inline(<<c, rest::binary>>, acc) 
+      when (c >= ?a and c <= ?z) or (c >= ?A and c <= ?Z) or 
+           (c >= ?0 and c <= ?9) or c == ?- or c == ?_ do
+    parse_name_inline(rest, <<acc::binary, c>>)
+  end
+  defp parse_name_inline(rest, acc), do: {acc, rest}
 
   # Skip comments until end of line - binary optimized
   defp skip_comment_binary(<<?\n, _::binary>> = rest), do: rest
@@ -320,10 +313,6 @@ defmodule SnmpLib.MIB.Lexer do
   end
 
   # Check if word is reserved (faithful to Erlang reserved_word/1)
-  defp reserved_word?(name) do
-    MapSet.member?(@reserved_words, name)
-  end
-
   @doc """
   Format error messages
   """

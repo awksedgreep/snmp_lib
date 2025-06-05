@@ -169,10 +169,8 @@ defmodule SnmpLib.MIB.Parser do
     end
   end
 
-  @doc """
-  Apply hex atom conversion to tokens from the 1:1 tokenizer.
-  Converts hex atoms like :"07fffffff" to integers for grammar compatibility.
-  """
+  # Apply hex atom conversion to tokens from the 1:1 tokenizer.
+  # Converts hex atoms like :"07fffffff" to integers for grammar compatibility.
   defp apply_hex_conversion(tokens) do
     Enum.map(tokens, &convert_hex_atom/1)
   end
@@ -201,11 +199,9 @@ defmodule SnmpLib.MIB.Parser do
   # Pass through all other tokens unchanged
   defp convert_hex_atom(token), do: token
 
-  @doc """
-  Convert our token format to the format expected by the Erlang grammar.
-  Our format: {:identifier, "value", line}
-  Grammar expects: {variable, line, "value"} or {atom, line}
-  """
+  # Convert our token format to the format expected by the Erlang grammar.
+  # Our format: {:identifier, "value", line}
+  # Grammar expects: {variable, line, "value"} or {atom, line}
   defp convert_tokens_for_grammar(tokens) do
     converted_tokens = Enum.map(tokens, &convert_single_token/1)
     # Yecc parsers expect the end-of-input token in this format
@@ -330,9 +326,7 @@ defmodule SnmpLib.MIB.Parser do
     {:variable, line, to_string(value)}
   end
 
-  @doc """
-  Convert the Erlang parse tree to Elixir-friendly format.
-  """
+  # Convert the Erlang parse tree to Elixir-friendly format.
   defp convert_to_elixir_format(result) do
     case result do
       {:pdata, version, mib_name, exports, imports, definitions} ->
@@ -396,7 +390,7 @@ defmodule SnmpLib.MIB.Parser do
     end)
   end
   
-  defp convert_imports(imports) do
+  defp convert_imports(_imports) do
     []
   end
 
@@ -462,16 +456,7 @@ defmodule SnmpLib.MIB.Parser do
     }
   end
 
-  # Handle other record types as they come up
-  defp convert_definition({record_tuple, line}) do
-    %{
-      __type__: :unknown,
-      record: record_tuple,
-      line: line
-    }
-  end
-  
-  # Legacy format handler (may not be needed with real parser)
+  # Handle legacy format first (more specific pattern)
   defp convert_definition({:ok, {type, name, rest}}) do
     base = %{
       __type__: type,
@@ -497,6 +482,15 @@ defmodule SnmpLib.MIB.Parser do
       _ ->
         Map.put(base, :data, rest)
     end
+  end
+
+  # Handle other record types as catch-all
+  defp convert_definition({record_tuple, line}) do
+    %{
+      __type__: :unknown,
+      record: record_tuple,
+      line: line
+    }
   end
 
   defp convert_object_type(base, {syntax, access, status, description, reference, index, defval, oid}) do
@@ -755,7 +749,7 @@ defmodule SnmpLib.MIB.Parser do
       # Handle improper lists like [115, 121, 110 | ""]
       case charlist do
         [] -> ""
-        [head | tail] when is_integer(head) and head >= 0 and head <= 1114111 ->
+        [head | _tail] when is_integer(head) and head >= 0 and head <= 1114111 ->
           try do
             # Try to convert the whole thing, handling improper lists
             convert_improper_charlist(charlist, [])

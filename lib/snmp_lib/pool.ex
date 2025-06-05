@@ -346,7 +346,7 @@ defmodule SnmpLib.Pool do
   end
   
   @impl GenServer
-  def handle_call({:checkout, device, opts}, from, state) do
+  def handle_call({:checkout, device, _opts}, _from, state) do
     case find_available_connection(state, device) do
       {:ok, connection, new_state} ->
         updated_connection = %{connection | 
@@ -391,7 +391,7 @@ defmodule SnmpLib.Pool do
   end
   
   @impl GenServer
-  def handle_cast({:record_success, connection, response_time}, state) do
+  def handle_cast({:record_success, _connection, response_time}, state) do
     # Record successful operation metrics
     new_times = [response_time | Enum.take(state.response_times, 99)]  # Keep last 100
     new_state = %{state | response_times: new_times}
@@ -399,7 +399,7 @@ defmodule SnmpLib.Pool do
   end
   
   @impl GenServer
-  def handle_cast({:record_error, connection, error}, state) do
+  def handle_cast({:record_error, _connection, error}, state) do
     # Record error metrics - could update connection health here
     Logger.debug("Operation error on connection: #{inspect(error)}")
     {:noreply, state}

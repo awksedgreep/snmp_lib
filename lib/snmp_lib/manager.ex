@@ -580,9 +580,15 @@ defmodule SnmpLib.Manager do
   # Helper functions
   defp normalize_oid(oid) when is_list(oid), do: oid
   defp normalize_oid(oid) when is_binary(oid) do
-    case SnmpLib.OID.string_to_list(oid) do
+    # First try MIB symbolic name resolution
+    case SnmpLib.MIB.Registry.resolve_name(oid) do
       {:ok, oid_list} -> oid_list
-      {:error, _} -> [1, 3, 6, 1]  # Safe fallback
+      {:error, _} ->
+        # Fallback to numeric string parsing
+        case SnmpLib.OID.string_to_list(oid) do
+          {:ok, oid_list} -> oid_list
+          {:error, _} -> [1, 3, 6, 1]  # Safe fallback
+        end
     end
   end
   defp normalize_oid(_), do: [1, 3, 6, 1]

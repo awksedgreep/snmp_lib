@@ -538,6 +538,8 @@ defmodule SnmpLib.Walker do
   end
   
   defp merge_bulk_options(opts, bulk_size) do
-    Keyword.merge(opts, [max_repetitions: bulk_size])
+    # Ensure bulk_size is within reasonable bounds
+    adjusted_bulk_size = max(@min_bulk_size, min(@max_bulk_size, bulk_size))
+    Keyword.merge(opts, [max_repetitions: adjusted_bulk_size])
   end
 end

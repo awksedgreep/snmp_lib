@@ -89,7 +89,6 @@ defmodule SnmpLib.Dashboard do
   @default_port 4000
   @default_update_interval 5_000  # 5 seconds
   @default_retention_days 7
-  @max_timeseries_points 2000
   
   @type metric_name :: atom()
   @type metric_value :: number()

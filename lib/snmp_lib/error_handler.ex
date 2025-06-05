@@ -471,7 +471,7 @@ defmodule SnmpLib.ErrorHandler do
   # Core retry loop with exponential backoff and error classification.
   # Recursively retries functions based on error type and configuration.
   defp execute_with_retry(fun, config) do
-    start_time = System.monotonic_time(:microsecond)
+    _start_time = System.monotonic_time(:microsecond)
     
     try do
       case fun.() do

@@ -611,9 +611,11 @@ defmodule SnmpLib.ASN1 do
     
     max_positive = 1 <<< (byte_length * 8 - 1)
     
-    if positive_value > max_positive do
+    byte_length = if positive_value > max_positive do
       # Need one more byte
-      byte_length = byte_length + 1
+      byte_length + 1
+    else
+      byte_length
     end
     
     # Calculate two's complement

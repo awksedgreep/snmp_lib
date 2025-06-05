@@ -65,7 +65,7 @@ defmodule SnmpLib.Security.USM do
   
   require Logger
   
-  alias SnmpLib.Security.{Auth, Priv, Keys}
+  alias SnmpLib.Security.{Auth, Priv}
   alias SnmpLib.{PDU, Transport}
   
   @type engine_id :: binary()
