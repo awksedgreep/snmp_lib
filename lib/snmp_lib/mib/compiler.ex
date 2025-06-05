@@ -33,7 +33,7 @@ defmodule SnmpLib.MIB.Compiler do
       ])
   """
   
-  alias SnmpLib.MIB.{Lexer, Parser, AST, Logger, Error}
+  alias SnmpLib.MIB.{Parser, AST, Logger, Error}
   
   @type compile_opts :: [
     output_dir: Path.t(),
@@ -172,8 +172,7 @@ defmodule SnmpLib.MIB.Compiler do
   def compile_string(mib_content, opts \\ []) when is_binary(mib_content) do
     opts = Keyword.merge(@default_opts, opts)
     
-    with {:ok, tokens} <- Lexer.tokenize(mib_content),
-         parse_result <- Parser.parse_tokens(tokens) do
+    with parse_result <- Parser.parse(mib_content) do
       
       case parse_result do
         {:ok, mib} ->

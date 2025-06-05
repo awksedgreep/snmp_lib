@@ -1,9 +1,10 @@
 defmodule SnmpLib.MIB.Parser do
   @moduledoc """
-  SNMP MIB parser - a true 1:1 port of Erlang SNMP MIB parser.
+  Production SNMP MIB parser using the Erlang SNMP grammar.
   
-  This uses the real snmpc_mib_gram.yrl grammar file from Erlang/OTP
-  compiled with yecc parser generator for proper SNMP MIB parsing.
+  This module provides a complete, pure Elixir implementation for parsing
+  SNMP MIB files. It uses the official snmpc_mib_gram.yrl grammar file
+  from Erlang/OTP compiled with yecc for 100% compatibility.
   """
   
   require Logger
@@ -142,30 +143,25 @@ defmodule SnmpLib.MIB.Parser do
   end
 
   @doc """
-  Tokenize MIB content using Erlang's SNMP tokenizer.
-  This ensures we use the exact same tokenization as Erlang.
+  Tokenize MIB content using the production SNMP tokenizer.
+  
+  Uses the SnmpLib.MIB.SnmpTokenizer module which is a 1:1 port
+  of the Erlang SNMP tokenizer for complete compatibility.
   """
   def tokenize(mib_content) when is_binary(mib_content) do
     # Convert to charlist for Erlang compatibility
     char_content = to_charlist(mib_content)
     
-    # Use our 1:1 port of the Erlang SNMP tokenizer
+    # Use the 1:1 port of the Erlang SNMP tokenizer (production implementation)
     case SnmpLib.MIB.SnmpTokenizer.tokenize(char_content, &SnmpLib.MIB.SnmpTokenizer.null_get_line/0) do
       {:ok, tokens} ->
-        Logger.debug("Using 1:1 Elixir port of Erlang SNMP tokenizer")
-        # Apply hex atom conversion to tokens from 1:1 tokenizer
+        Logger.debug("Tokenized MIB content successfully")
+        # Apply hex atom conversion to tokens from the tokenizer
         converted_tokens = apply_hex_conversion(tokens)
         {:ok, converted_tokens}
       {:error, reason} ->
-        Logger.debug("1:1 tokenizer error: #{inspect(reason)}")
-        # Fall back to our custom tokenizer if needed
-        case SnmpLib.MIB.Lexer.tokenize(mib_content) do
-          {:ok, tokens} ->
-            Logger.debug("Falling back to custom tokenizer")
-            {:ok, convert_tokens_for_grammar(tokens)}
-          {:error, reason} ->
-            {:error, reason}
-        end
+        Logger.error("Tokenization failed: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
@@ -198,133 +194,6 @@ defmodule SnmpLib.MIB.Parser do
   
   # Pass through all other tokens unchanged
   defp convert_hex_atom(token), do: token
-
-  # Convert our token format to the format expected by the Erlang grammar.
-  # Our format: {:identifier, "value", line}
-  # Grammar expects: {variable, line, "value"} or {atom, line}
-  defp convert_tokens_for_grammar(tokens) do
-    converted_tokens = Enum.map(tokens, &convert_single_token/1)
-    # Yecc parsers expect the end-of-input token in this format
-    converted_tokens ++ [{:'$end', 0}]
-  end
-
-  # Convert specific identifiers to atoms for status/access values first
-  defp convert_single_token({:identifier, "read-only", line}), do: {:atom, line, :"read-only"}
-  defp convert_single_token({:identifier, "current", line}), do: {:atom, line, :current}
-  defp convert_single_token({:identifier, "mandatory", line}), do: {:atom, line, :mandatory}
-  defp convert_single_token({:identifier, "optional", line}), do: {:atom, line, :optional}
-  defp convert_single_token({:identifier, "obsolete", line}), do: {:atom, line, :obsolete}
-  defp convert_single_token({:identifier, "deprecated", line}), do: {:atom, line, :deprecated}
-  defp convert_single_token({:identifier, "read-write", line}), do: {:atom, line, :"read-write"}
-  defp convert_single_token({:identifier, "write-only", line}), do: {:atom, line, :"write-only"}
-  defp convert_single_token({:identifier, "not-accessible", line}), do: {:atom, line, :"not-accessible"}
-  defp convert_single_token({:identifier, "accessible-for-notify", line}), do: {:atom, line, :"accessible-for-notify"}
-  defp convert_single_token({:identifier, "read-create", line}), do: {:atom, line, :"read-create"}
-
-  # Convert identifiers to atoms for object names (these appear in OID definitions)
-  # MIB names stay as variables, but object names become atoms
-  defp convert_single_token({:identifier, "TEST-MIB", line}) do
-    {:variable, line, "TEST-MIB"}
-  end
-  
-  # Convert other identifiers to atoms (object names, etc.)
-  defp convert_single_token({:identifier, value, line}) do
-    {:atom, line, String.to_atom(value)}
-  end
-  
-  # Convert hex atoms that look like integers to actual integers
-  defp convert_single_token({:atom, line, atom_value}) when is_atom(atom_value) do
-    atom_string = Atom.to_string(atom_value)
-    
-    # Check if it looks like a hex number
-    if String.match?(atom_string, ~r/^[0-9a-fA-F]+$/) do
-      try do
-        # Try to convert from hex to integer
-        hex_value = String.to_integer(atom_string, 16)
-        {:integer, line, hex_value}
-      rescue
-        _ ->
-          # If conversion fails, keep as atom
-          {:atom, line, atom_value}
-      end
-    else
-      # Not a hex pattern, keep as atom
-      {:atom, line, atom_value}
-    end
-  end
-
-  # Convert integers 
-  defp convert_single_token({:integer, value, line}) do
-    {:integer, line, value}
-  end
-
-  # Convert strings
-  defp convert_single_token({:string, value, line}) do
-    {:string, line, value}
-  end
-
-
-  # Convert keywords to their terminal names
-  defp convert_single_token({:keyword, :definitions, line}), do: {:'DEFINITIONS', line}
-  defp convert_single_token({:keyword, :begin, line}), do: {:'BEGIN', line}
-  defp convert_single_token({:keyword, :end, line}), do: {:'END', line}
-  defp convert_single_token({:keyword, :imports, line}), do: {:'IMPORTS', line}
-  defp convert_single_token({:keyword, :from, line}), do: {:'FROM', line}
-  defp convert_single_token({:keyword, :object, line}), do: {:'OBJECT', line}
-  defp convert_single_token({:keyword, :identifier, line}), do: {:'IDENTIFIER', line}
-  defp convert_single_token({:keyword, :object_type, line}), do: {:'OBJECT-TYPE', line}
-  defp convert_single_token({:keyword, :syntax, line}), do: {:'SYNTAX', line}
-  defp convert_single_token({:keyword, :max_access, line}), do: {:'MAX-ACCESS', line}
-  defp convert_single_token({:keyword, :status, line}), do: {:'STATUS', line}
-  defp convert_single_token({:keyword, :description, line}), do: {:'DESCRIPTION', line}
-  defp convert_single_token({:keyword, :integer32, line}), do: {:variable, line, "Integer32"}
-
-  # Convert SNMPv2 keywords to their terminal names
-  defp convert_single_token({:keyword, :module_identity, line}), do: {:'MODULE-IDENTITY', line}
-  defp convert_single_token({:keyword, :module_compliance, line}), do: {:'MODULE-COMPLIANCE', line}
-  defp convert_single_token({:keyword, :textual_convention, line}), do: {:'TEXTUAL-CONVENTION', line}
-  defp convert_single_token({:keyword, :object_group, line}), do: {:'OBJECT-GROUP', line}
-  defp convert_single_token({:keyword, :notification_group, line}), do: {:'NOTIFICATION-GROUP', line}
-  defp convert_single_token({:keyword, :object_identity, line}), do: {:'OBJECT-IDENTITY', line}
-  defp convert_single_token({:keyword, :notification_type, line}), do: {:'NOTIFICATION-TYPE', line}
-  defp convert_single_token({:keyword, :agent_capabilities, line}), do: {:'AGENT-CAPABILITIES', line}
-  defp convert_single_token({:keyword, :last_updated, line}), do: {:'LAST-UPDATED', line}
-  defp convert_single_token({:keyword, :organization, line}), do: {:'ORGANIZATION', line}
-  defp convert_single_token({:keyword, :contact_info, line}), do: {:'CONTACT-INFO', line}
-  defp convert_single_token({:keyword, :revision, line}), do: {:'REVISION', line}
-  defp convert_single_token({:keyword, :units, line}), do: {:'UNITS', line}
-  defp convert_single_token({:keyword, :augments, line}), do: {:'AUGMENTS', line}
-  defp convert_single_token({:keyword, :implied, line}), do: {:'IMPLIED', line}
-  defp convert_single_token({:keyword, :objects, line}), do: {:'OBJECTS', line}
-  defp convert_single_token({:keyword, :notifications, line}), do: {:'NOTIFICATIONS', line}
-  defp convert_single_token({:keyword, :module, line}), do: {:'MODULE', line}
-  defp convert_single_token({:keyword, :mandatory_groups, line}), do: {:'MANDATORY-GROUPS', line}
-  defp convert_single_token({:keyword, :group, line}), do: {:'GROUP', line}
-  defp convert_single_token({:keyword, :write_syntax, line}), do: {:'WRITE-SYNTAX', line}
-  defp convert_single_token({:keyword, :min_access, line}), do: {:'MIN-ACCESS', line}
-  defp convert_single_token({:keyword, :display_hint, line}), do: {:'DISPLAY-HINT', line}
-  defp convert_single_token({:keyword, :reference, line}), do: {:'REFERENCE', line}
-  defp convert_single_token({:keyword, :index, line}), do: {:'INDEX', line}
-  defp convert_single_token({:keyword, :defval, line}), do: {:'DEFVAL', line}
-  defp convert_single_token({:keyword, :size, line}), do: {:'SIZE', line}
-  defp convert_single_token({:keyword, :trap_type, line}), do: {:'TRAP-TYPE', line}
-  defp convert_single_token({:keyword, :enterprise, line}), do: {:'ENTERPRISE', line}
-  defp convert_single_token({:keyword, :variables, line}), do: {:'VARIABLES', line}
-
-  # Convert symbols to their terminal equivalents
-  defp convert_single_token({:symbol, :assign, line}), do: {:'::=', line}
-  defp convert_single_token({:symbol, :comma, line}), do: {:',', line}
-  defp convert_single_token({:symbol, :semicolon, line}), do: {:';', line}
-  defp convert_single_token({:symbol, :open_brace, line}), do: {:'{', line}
-  defp convert_single_token({:symbol, :close_brace, line}), do: {:'}', line}
-  defp convert_single_token({:symbol, :open_paren, line}), do: {:'(', line}
-  defp convert_single_token({:symbol, :close_paren, line}), do: {:')', line}
-
-  # Default case for other identifiers that should be variables
-  defp convert_single_token({token_type, value, line}) do
-    Logger.warning("Unknown token #{inspect({token_type, value, line})}")
-    {:variable, line, to_string(value)}
-  end
 
   # Convert the Erlang parse tree to Elixir-friendly format.
   defp convert_to_elixir_format(result) do

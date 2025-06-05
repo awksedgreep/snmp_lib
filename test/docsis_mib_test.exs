@@ -1,7 +1,7 @@
 defmodule SnmpLib.DocsisMibTest do
   use ExUnit.Case
   
-  alias SnmpLib.MIB.{Parser, Lexer}
+  alias SnmpLib.MIB.Parser
   
   @moduledoc """
   Official test suite for DOCSIS MIB compatibility.
@@ -192,7 +192,7 @@ defmodule SnmpLib.DocsisMibTest do
       END
       """
       
-      {:ok, tokens} = Lexer.tokenize(mib_content)
+      {:ok, mib} = Parser.parse(mib_content)
       {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
@@ -212,7 +212,7 @@ defmodule SnmpLib.DocsisMibTest do
       END
       """
       
-      {:ok, tokens} = Lexer.tokenize(mib_content)
+      {:ok, mib} = Parser.parse(mib_content)
       {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
@@ -236,7 +236,7 @@ defmodule SnmpLib.DocsisMibTest do
       END
       """
       
-      {:ok, tokens} = Lexer.tokenize(mib_content)
+      {:ok, mib} = Parser.parse(mib_content)
       {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
@@ -252,9 +252,9 @@ defmodule SnmpLib.DocsisMibTest do
     Enum.map(mibs, fn {name, path} ->
       result = case File.read(path) do
         {:ok, content} ->
-          case Lexer.tokenize(content) do
-            {:ok, tokens} ->
-              Parser.parse_tokens(tokens)
+          case Parser.parse(content) do
+            {:ok, mib} ->
+              {:ok, mib}
             {:error, error} ->
               {:error, [error]}
           end
@@ -268,9 +268,7 @@ defmodule SnmpLib.DocsisMibTest do
   
   defp parse_mib_successfully(path) do
     {:ok, content} = File.read(path)
-    {:ok, tokens} = Lexer.tokenize(content)
-    
-    case Parser.parse_tokens(tokens) do
+    case Parser.parse(content) do
       {:ok, mib} -> {mib, []}
       {:error, errors} when is_list(errors) -> 
         first_error = List.first(errors)

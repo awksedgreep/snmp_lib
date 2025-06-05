@@ -14,7 +14,7 @@ defmodule SnmpLib.MIB.ComprehensiveMibTest do
 
   describe "MIB compatibility tests" do
     for {dir_name, dir_path} <- @test_dirs do
-      test "#{dir_name} MIBs tokenize successfully" do
+      test "#{dir_name} MIBs parse successfully" do
         dir_path = Path.join(File.cwd!(), unquote(dir_path))
         
         case File.ls(dir_path) do
@@ -65,17 +65,22 @@ defmodule SnmpLib.MIB.ComprehensiveMibTest do
           content = File.read!(full_path)
           
           # Warm up
-          {:ok, _} = SnmpLib.MIB.Lexer.tokenize(content)
+          {:ok, _} = SnmpLib.MIB.Parser.parse(content)
           
           # Performance test
-          {time_us, {:ok, tokens}} = :timer.tc(fn ->
-            SnmpLib.MIB.Lexer.tokenize(content)
+          {time_us, {:ok, mib}} = :timer.tc(fn ->
+            SnmpLib.MIB.Parser.parse(content)
           end)
           
-          rate = length(tokens) / time_us * 1_000_000
+          # Calculate a rate based on definitions instead of tokens
+          definitions_count = case mib do
+            %{definitions: defs} when is_list(defs) -> length(defs)
+            _ -> 1
+          end
+          rate = definitions_count / time_us * 1_000_000
           
           assert rate >= min_rate, 
-            "#{type} MIB performance too slow: #{Float.round(rate)} tokens/sec < #{min_rate}"
+            "#{type} MIB performance too slow: #{Float.round(rate)} definitions/sec < #{min_rate}"
         end
       end
     end
@@ -94,9 +99,9 @@ defmodule SnmpLib.MIB.ComprehensiveMibTest do
         :erlang.garbage_collect()
         initial_memory = :erlang.memory(:total)
         
-        # Run tokenization multiple times
+        # Run parsing multiple times
         for _ <- 1..100 do
-          {:ok, _tokens} = SnmpLib.MIB.Lexer.tokenize(content)
+          {:ok, _mib} = SnmpLib.MIB.Parser.parse(content)
         end
         
         # Force garbage collection and check memory
@@ -134,9 +139,13 @@ defmodule SnmpLib.MIB.ComprehensiveMibTest do
   defp test_single_mib_file(file_path, file_name) do
     case File.read(file_path) do
       {:ok, content} ->
-        case SnmpLib.MIB.Lexer.tokenize(content) do
-          {:ok, tokens} when is_list(tokens) ->
-            {:ok, {file_name, length(tokens)}}
+        case SnmpLib.MIB.Parser.parse(content) do
+          {:ok, mib} when is_map(mib) ->
+            definitions_count = case mib do
+              %{definitions: defs} when is_list(defs) -> length(defs)
+              _ -> 1
+            end
+            {:ok, {file_name, definitions_count}}
           {:error, reason} ->
             {:error, {file_name, reason}}
         end

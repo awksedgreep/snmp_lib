@@ -4,7 +4,7 @@ defmodule SnmpLib.MIB.ParserTest do
   
   @moduletag :parsing_edge_cases
   
-  alias SnmpLib.MIB.{Parser, Lexer, Error}
+  alias SnmpLib.MIB.{Parser, Error}
   
   describe "basic MIB parsing" do
     test "parses minimal MIB structure" do
@@ -13,8 +13,7 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
       assert mib.imports == []
@@ -29,8 +28,7 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
       assert length(mib.imports) == 1
@@ -46,8 +44,7 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
       assert length(mib.definitions) == 1
@@ -68,8 +65,7 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
       assert length(mib.definitions) == 1
@@ -94,8 +90,8 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:error, errors} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
+      assert {:error, errors} = Parser.parse(mib_content)
       
       assert is_list(errors)
       assert length(errors) > 0
@@ -113,9 +109,9 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
+      assert {:ok, mib} = Parser.parse(mib_content)
       # Should fail due to missing MAX-ACCESS and STATUS
-      assert {:error, errors} = Parser.parse_tokens(tokens)
+      assert {:error, errors} = Parser.parse(mib_content)
       assert is_list(errors)
     end
     
@@ -126,8 +122,8 @@ defmodule SnmpLib.MIB.ParserTest do
           SYNTAX INTEGER
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:error, errors} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
+      assert {:error, errors} = Parser.parse(mib_content)
       assert is_list(errors)
     end
   end
@@ -142,8 +138,7 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
       assert length(mib.imports) == 2
@@ -164,15 +159,14 @@ defmodule SnmpLib.MIB.ParserTest do
       END
       """
       
-      assert {:ok, tokens} = Lexer.tokenize(mib_content)
-      assert {:ok, mib} = Parser.parse_tokens(tokens)
+      assert {:ok, mib} = Parser.parse(mib_content)
       
       assert %{__type__: :mib, name: "TEST-MIB"} = mib
     end
   end
   
-  describe "integration with lexer" do
-    test "parses tokens directly from string" do
+  describe "full parsing integration" do
+    test "parses MIB content with OBJECT-TYPE definitions" do
       mib_content = """
       SIMPLE-MIB DEFINITIONS ::= BEGIN
       simpleObject OBJECT-TYPE
