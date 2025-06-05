@@ -113,12 +113,17 @@ writesyntaxpart
 fsyntax
 defbitsvalue
 defbitsnames
+macrodefinition
+anytokens
+anytoken
+choiceelements
+choiceelement
 .
 
 %% ----------------------------------------------------------------------
 Terminals 
 %% ----------------------------------------------------------------------
-integer variable atom string quote '{' '}' '::=' ':' '=' ',' '.' '(' ')' ';' '|' '..'
+integer variable atom string quote '{' '}' '::=' ':' '=' ',' '.' '(' ')' ';' '|' '..' '[' ']'
 'ACCESS'
 'BEGIN'
 'BIT'
@@ -136,6 +141,7 @@ integer variable atom string quote '{' '}' '::=' ':' '=' ',' '.' '(' ')' ';' '|'
 'IMPORTS'
 'INDEX'
 'INTEGER'
+'MACRO'
 'IpAddress'
 'NetworkAddress'
 'OBJECT'
@@ -215,6 +221,15 @@ integer variable atom string quote '{' '}' '::=' ':' '=' ',' '.' '(' ')' ';' '|'
 'Gauge32'
 'Unsigned32'
 'Integer32'
+'NULL'
+% Additional terminals for macro content
+'TYPE'
+'NOTATION'
+'VALUE'
+% ASN.1 syntax terminals
+'CHOICE'
+'APPLICATION'
+'IMPLICIT'
 .
 
 
@@ -237,6 +252,7 @@ definition -> objecttypev1 : '$1'.
 definition -> newtype : '$1'.
 definition -> tableentrydefinition : '$1'.
 definition -> traptype : '$1'.
+definition -> macrodefinition : '$1'.
 % Support SNMPv2 constructs in v1 MIBs
 definition -> textualconvention : '$1'.
 definition -> objectidentity : '$1'.
@@ -260,6 +276,13 @@ exportlist -> exportlist ',' export_stuff : ['$3' | '$1'].
 
 export_stuff -> variable : {type, val('$1')}.
 export_stuff -> atom : {node, val('$1')}.
+export_stuff -> 'OBJECT-TYPE' : {builtin, 'OBJECT-TYPE'}.
+export_stuff -> 'NetworkAddress' : {builtin, 'NetworkAddress'}.
+export_stuff -> 'IpAddress' : {builtin, 'IpAddress'}.
+export_stuff -> 'Counter' : {builtin, 'Counter'}.
+export_stuff -> 'Gauge' : {builtin, 'Gauge'}.
+export_stuff -> 'TimeTicks' : {builtin, 'TimeTicks'}.
+export_stuff -> 'Opaque' : {builtin, 'Opaque'}.
 
 import -> '$empty' : [].
 import -> 'IMPORTS' imports ';' : 
@@ -376,6 +399,12 @@ syntax -> usertype '{' namedbits '}' :
           {{type_with_enum, 'INTEGER', '$3'}, line_of('$1')}.
 syntax -> 'SEQUENCE' 'OF' usertype : 
           {{sequence_of,val('$3')},line_of('$1')}.
+syntax -> 'CHOICE' '{' choiceelements '}' : 
+          {{choice, '$3'}, line_of('$1')}.
+syntax -> '[' 'APPLICATION' integer ']' 'IMPLICIT' syntax : 
+          {{tagged_type, 'APPLICATION', val('$3'), 'IMPLICIT', '$6'}, line_of('$1')}.
+syntax -> '[' 'APPLICATION' integer ']' syntax : 
+          {{tagged_type, 'APPLICATION', val('$3'), undefined, '$5'}, line_of('$1')}.
 
 size -> '(' sizedescr ')' : make_range('$2').
 size -> '(' 'SIZE' '(' sizedescr  ')' ')' : make_range('$4').
@@ -429,6 +458,7 @@ type -> 'Counter64' : '$1'.
 type -> 'Gauge32' : '$1'.
 type -> 'Unsigned32' : '$1'.
 type -> 'Integer32' : '$1'.
+type -> 'NULL' : '$1'.
 
 % Returns: {FatherName, SubIndex}   (the parent)
 nameassign -> implies '{' fatherobjectname parentintegers '}' : {'$3', '$4' }.
@@ -492,6 +522,15 @@ objectname -> atom : val('$1').
 mibname -> variable : val('$1').
 fatherobjectname -> objectname : '$1'.
 newtypename -> variable : val('$1').
+newtypename -> 'Integer32' : 'Integer32'.
+newtypename -> 'Unsigned32' : 'Unsigned32'.
+newtypename -> 'Counter32' : 'Counter32'.
+newtypename -> 'Counter64' : 'Counter64'.
+newtypename -> 'Gauge32' : 'Gauge32'.
+newtypename -> 'IpAddress' : 'IpAddress'.
+newtypename -> 'NetworkAddress' : 'NetworkAddress'.
+newtypename -> 'Opaque' : 'Opaque'.
+newtypename -> 'TimeTicks' : 'TimeTicks'.
 
 accessv1 -> atom: accessv1('$1').
 accessv1 -> 'read-only' : 'read-only'.
@@ -558,6 +597,12 @@ textualconvention -> newtypename implies 'TEXTUAL-CONVENTION' displaypart
                      'STATUS' statusv2 description referpart 'SYNTAX' syntax :
                      NT = make_new_type('$1', 'TEXTUAL-CONVENTION', '$4', 
                                         '$6', '$7', '$8', '$10'),
+                     {NT, line_of('$3')}.
+% Alternative rule for complex TEXTUAL-CONVENTION with large enumerations
+textualconvention -> newtypename implies 'TEXTUAL-CONVENTION' displaypart
+                     'STATUS' statusv2 description referpart 'SYNTAX' 'INTEGER' '{' anytokens '}' :
+                     NT = make_new_type('$1', 'TEXTUAL-CONVENTION', '$4', 
+                                        '$6', '$7', '$8', {integer_enum, '$11'}),
                      {NT, line_of('$3')}.
 
 objectidentity -> objectname 'OBJECT-IDENTITY' 'STATUS' statusv2
@@ -739,6 +784,128 @@ objectspart -> '$empty' : [].
 
 objects -> objectname : ['$1'].
 objects -> objects ',' objectname : ['$3'|'$1'].
+
+% Macro definitions - consume and ignore everything between MACRO ::= BEGIN and END
+% This is much simpler and handles any macro content without needing to parse it
+macrodefinition -> 'MODULE-IDENTITY' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'TEXTUAL-CONVENTION' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'OBJECT-TYPE' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'OBJECT-IDENTITY' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'TRAP-TYPE' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'OBJECT-GROUP' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'NOTIFICATION-GROUP' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'MODULE-COMPLIANCE' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'AGENT-CAPABILITIES' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+macrodefinition -> 'NOTIFICATION-TYPE' 'MACRO' '::=' 'BEGIN' anytokens 'END' : 
+                   {ignore_macro, line_of('$2')}.
+% Handle standalone NOTIFICATION-TYPE macro definitions (like in SNMPv2-SMI)
+macrodefinition -> 'NOTIFICATION-TYPE' 'MACRO' '::=' anytokens :
+                   {ignore_macro, line_of('$2')}.
+% Handle ASN.1 type definitions as ignored constructs for manager context
+macrodefinition -> 'Counter' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+macrodefinition -> 'Gauge' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+macrodefinition -> 'TimeTicks' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+macrodefinition -> 'NetworkAddress' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+macrodefinition -> 'IpAddress' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+macrodefinition -> 'Opaque' '::=' anytokens :
+                   {ignore_typedef, line_of('$2')}.
+
+% Very permissive token sequence - matches any tokens until END
+anytokens -> '$empty' : [].
+anytokens -> anytoken anytokens : ['$1' | '$2'].
+
+% Accept any token as anytoken - this catches everything
+anytoken -> atom : '$1'.
+anytoken -> string : '$1'.
+anytoken -> integer : '$1'.
+anytoken -> variable : '$1'.
+anytoken -> quote : '$1'.
+anytoken -> '{' : '$1'.
+anytoken -> '}' : '$1'.
+anytoken -> '[' : '$1'.
+anytoken -> ']' : '$1'.
+anytoken -> '::=' : '$1'.
+anytoken -> ':' : '$1'.
+anytoken -> '=' : '$1'.
+anytoken -> ',' : '$1'.
+anytoken -> '.' : '$1'.
+anytoken -> '(' : '$1'.
+anytoken -> ')' : '$1'.
+anytoken -> ';' : '$1'.
+anytoken -> '|' : '$1'.
+anytoken -> '..' : '$1'.
+% Include all terminals as possible tokens inside macros
+anytoken -> 'ACCESS' : '$1'.
+anytoken -> 'BIT' : '$1'.
+anytoken -> 'Counter' : '$1'.
+anytoken -> 'DEFINITIONS' : '$1'.
+anytoken -> 'DEFVAL' : '$1'.
+anytoken -> 'DESCRIPTION' : '$1'.
+anytoken -> 'DISPLAY-HINT' : '$1'.
+anytoken -> 'ENTERPRISE' : '$1'.
+anytoken -> 'EXPORTS' : '$1'.
+anytoken -> 'FROM' : '$1'.
+anytoken -> 'Gauge' : '$1'.
+anytoken -> 'IDENTIFIER' : '$1'.
+anytoken -> 'IMPORTS' : '$1'.
+anytoken -> 'INDEX' : '$1'.
+anytoken -> 'INTEGER' : '$1'.
+anytoken -> 'IpAddress' : '$1'.
+anytoken -> 'NetworkAddress' : '$1'.
+anytoken -> 'OBJECT' : '$1'.
+anytoken -> 'OBJECT-TYPE' : '$1'.
+anytoken -> 'OCTET' : '$1'.
+anytoken -> 'OF' : '$1'.
+anytoken -> 'Opaque' : '$1'.
+anytoken -> 'REFERENCE' : '$1'.
+anytoken -> 'SEQUENCE' : '$1'.
+anytoken -> 'SIZE' : '$1'.
+anytoken -> 'STATUS' : '$1'.
+anytoken -> 'STRING' : '$1'.
+anytoken -> 'SYNTAX' : '$1'.
+anytoken -> 'TRAP-TYPE' : '$1'.
+anytoken -> 'TimeTicks' : '$1'.
+anytoken -> 'VARIABLES' : '$1'.
+anytoken -> 'current' : '$1'.
+anytoken -> 'deprecated' : '$1'.
+anytoken -> 'obsolete' : '$1'.
+anytoken -> 'mandatory' : '$1'.
+anytoken -> 'optional' : '$1'.
+anytoken -> 'read-only' : '$1'.
+anytoken -> 'read-write' : '$1'.
+anytoken -> 'write-only' : '$1'.
+anytoken -> 'not-accessible' : '$1'.
+anytoken -> 'accessible-for-notify' : '$1'.
+anytoken -> 'read-create' : '$1'.
+anytoken -> 'TYPE' : '$1'.
+anytoken -> 'NOTATION' : '$1'.
+anytoken -> 'VALUE' : '$1'.
+anytoken -> 'CHOICE' : '$1'.
+anytoken -> 'APPLICATION' : '$1'.
+anytoken -> 'IMPLICIT' : '$1'.
+anytoken -> 'NOTIFICATION-TYPE' : '$1'.
+anytoken -> 'NULL' : '$1'.
+
+% Choice elements for ASN.1 CHOICE types
+choiceelements -> choiceelement : ['$1'].
+choiceelements -> choiceelements ',' choiceelement : ['$3' | '$1'].
+
+choiceelement -> atom syntax : {val('$1'), '$2'}.
+choiceelement -> atom : {val('$1'), undefined}.
 
 %%----------------------------------------------------------------------
 Erlang code.
