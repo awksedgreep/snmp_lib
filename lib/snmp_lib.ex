@@ -268,7 +268,7 @@ defmodule SnmpLib do
   ## Examples
   
       iex> SnmpLib.version()
-      "0.1.9"
+      "0.3.0"
   """
   def version do
     Application.spec(:snmp_lib, :vsn) |> to_string()
