@@ -143,6 +143,58 @@ defmodule SnmpLib.Manager do
   end
   
   @doc """
+  Performs an SNMP GETNEXT operation to retrieve the next value in the MIB tree.
+  
+  GETNEXT is used to traverse the MIB tree by retrieving the next available
+  object after the specified OID. This is essential for MIB walking operations
+  and discovering available objects on SNMP devices.
+  
+  ## Parameters
+  
+  - `host`: Target device IP address or hostname
+  - `oid`: Object identifier to get the next value after
+  - `opts`: Configuration options
+  
+  ## Implementation Details
+  
+  - **SNMP v1**: Uses proper GETNEXT PDU for compatibility
+  - **SNMP v2c+**: Uses optimized GETBULK with max_repetitions=1
+  
+  ## Returns
+  
+  - `{:ok, {next_oid, value}}`: Next OID and its value as a tuple
+  - `{:error, reason}`: Operation failed with reason
+  
+  ## Examples
+  
+      # Get next OID after system description
+      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0")
+      
+      # SNMP v1 compatibility
+      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", version: :v1)
+      
+      # With custom community
+      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", 
+                                                           community: "private", timeout: 10_000)
+  """
+  @spec get_next(host(), oid(), manager_opts()) :: {:ok, {oid(), snmp_value()}} | {:error, atom() | {atom(), any()}}
+  def get_next(host, oid, opts \\ []) do
+    opts = merge_default_opts(opts)
+    normalized_oid = normalize_oid(oid)
+    
+    Logger.debug("Starting GETNEXT operation: host=#{inspect(host)}, oid=#{inspect(normalized_oid)}, version=#{opts[:version]}")
+    
+    case opts[:version] do
+      :v1 ->
+        # Use proper GETNEXT PDU for SNMP v1 compatibility
+        perform_get_next_v1(host, normalized_oid, opts)
+      _ ->
+        # Use GETBULK with max_repetitions=1 for v2c+ efficiency
+        perform_get_next_v2c(host, normalized_oid, opts)
+    end
+  end
+  
+  @doc """
   Performs an SNMP GETBULK operation for efficient bulk data retrieval.
   
   GETBULK is more efficient than multiple GET operations when retrieving
@@ -576,6 +628,101 @@ defmodule SnmpLib.Manager do
     {:error, decode_error_status(error_status)}
   end
   defp extract_set_result(_), do: {:error, :invalid_response}
+  
+  # GETNEXT implementation for SNMP v1
+  defp perform_get_next_v1(host, oid, opts) do
+    with {:ok, socket} <- create_socket(opts) do
+      Logger.debug("Socket created successfully for GETNEXT v1")
+      
+      case perform_get_next_operation(socket, host, oid, opts) do
+        {:ok, response} ->
+          Logger.debug("GETNEXT v1 operation completed, extracting result")
+          :ok = close_socket(socket)
+          result = extract_get_next_result(response)
+          Logger.debug("Final GETNEXT v1 result: #{inspect(result)}")
+          result
+          
+        {:error, reason} = error ->
+          Logger.debug("GETNEXT v1 operation failed: #{inspect(reason)}")
+          :ok = close_socket(socket)
+          error
+      end
+    else
+      {:error, reason} = socket_error ->
+        Logger.debug("Socket creation failed for GETNEXT v1: #{inspect(reason)}")
+        socket_error
+    end
+  end
+  
+  # GETNEXT implementation for SNMP v2c+
+  defp perform_get_next_v2c(host, oid, opts) do
+    # Use get_bulk with max_repetitions=1 for efficiency
+    bulk_opts = Keyword.merge(opts, [max_repetitions: 1, non_repeaters: 0])
+    
+    case get_bulk(host, oid, bulk_opts) do
+      {:ok, [{next_oid, value}]} -> 
+        Logger.debug("GETNEXT v2c+ via GETBULK successful: #{inspect({next_oid, value})}")
+        {:ok, {next_oid, value}}
+      {:ok, []} -> 
+        Logger.debug("GETNEXT v2c+ reached end of MIB")
+        {:error, :end_of_mib_view}
+      {:ok, results} when is_list(results) ->
+        # Take the first result if multiple returned
+        case List.first(results) do
+          {next_oid, value} -> {:ok, {next_oid, value}}
+          _ -> {:error, :invalid_response}
+        end
+      {:error, reason} = error -> 
+        Logger.debug("GETNEXT v2c+ via GETBULK failed: #{inspect(reason)}")
+        error
+    end
+  end
+  
+  defp perform_get_next_operation(socket, host, oid, opts) do
+    request_id = generate_request_id()
+    pdu = SnmpLib.PDU.build_get_next_request(oid, request_id)
+    perform_snmp_request(socket, host, pdu, opts)
+  end
+  
+  defp extract_get_next_result(%{pdu: %{varbinds: [{next_oid, type, value}]}} = response) do
+    Logger.debug("Extracting GETNEXT result - PDU: #{inspect(response.pdu)}")
+    Logger.debug("Varbind details - next_oid: #{inspect(next_oid)}, type: #{inspect(type)}, value: #{inspect(value)}")
+    
+    # Check for SNMPv2c exception values in both type and value fields
+    case {type, value} do
+      # Exception values in type field (from simulator)
+      {:no_such_object, _} -> 
+        Logger.debug("Found exception in type field: no_such_object")
+        {:error, :no_such_object}
+      {:no_such_instance, _} -> 
+        Logger.debug("Found exception in type field: no_such_instance")
+        {:error, :no_such_instance}
+      {:end_of_mib_view, _} -> 
+        Logger.debug("Found exception in type field: end_of_mib_view")
+        {:error, :end_of_mib_view}
+      
+      # Exception values in value field (standard format)
+      {_, {:no_such_object, _}} -> 
+        Logger.debug("Found exception in value field: no_such_object")
+        {:error, :no_such_object}
+      {_, {:no_such_instance, _}} -> 
+        Logger.debug("Found exception in value field: no_such_instance")
+        {:error, :no_such_instance}
+      {_, {:end_of_mib_view, _}} -> 
+        Logger.debug("Found exception in value field: end_of_mib_view")
+        {:error, :end_of_mib_view}
+      
+      # Normal value - return both next OID and value
+      _ -> 
+        Logger.debug("Returning successful GETNEXT result: #{inspect({next_oid, value})}")
+        {:ok, {next_oid, value}}
+    end
+  end
+  
+  defp extract_get_next_result(response) do
+    Logger.error("Invalid GETNEXT response format: #{inspect(response)}")
+    {:error, :invalid_response}
+  end
   
   # Helper functions
   defp normalize_oid(oid) when is_list(oid), do: oid

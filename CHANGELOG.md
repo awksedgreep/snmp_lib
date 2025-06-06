@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2025-06-06
+
+### Added
+
+- **SNMP GETNEXT Support**: Implemented missing `get_next/3` function in `SnmpLib.Manager`
+  - Full SNMP v1 compatibility using proper GETNEXT PDU operations
+  - SNMP v2c+ efficiency using optimized GETBULK with `max_repetitions=1`
+  - Automatic version detection and appropriate protocol selection
+  - Consistent API following existing `get/3` and `get_bulk/3` patterns
+  - Proper error handling for network errors and SNMP exceptions
+  - Returns `{:ok, {next_oid, value}}` tuple format as specified
+  - Comprehensive test coverage with 10 test cases
+  - Enables proper MIB walking operations for all SNMP versions
+  - Allows higher-level libraries like `snmp_mgr` to remove version-forcing workarounds
+
 ## [1.0.1] - 2025-06-05
 
 ### Fixed

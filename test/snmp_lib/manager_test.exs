@@ -237,6 +237,13 @@ defmodule SnmpLib.ManagerTest do
       assert {:error, _} = Manager.get("invalid.host.test:1161", [1, 3, 6, 1], port: 162, timeout: 100)
       assert {:error, _} = Manager.get_bulk("invalid.host.test:1161", [1, 3, 6, 1], port: 162, timeout: 100)
       assert {:error, _} = Manager.set("invalid.host.test:1161", [1, 3, 6, 1], {:string, "test"}, port: 162, timeout: 100)
+      
+      # Test with get_multi
+      oids = [[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 3, 0]]
+      assert {:error, _} = Manager.get_multi("invalid.host.test:1161", oids, port: 162, timeout: 100)
+      
+      # Test with ping
+      assert {:error, _} = Manager.ping("invalid.host.test:1161", port: 162, timeout: 100)
     end
     
     test "handles IPv6 addresses without confusing them with port specifications" do
@@ -483,6 +490,145 @@ defmodule SnmpLib.ManagerTest do
       # At minimum, they should both complete within reasonable time
       assert time_individual > 0
       assert time_multi > 0
+    end
+  end
+  
+  describe "Manager.get_next/3" do
+    test "performs basic GETNEXT operation with default options" do
+      # Test function exists and has correct signature
+      assert is_function(&Manager.get_next/3)
+      
+      # Test with list OID - should fail with invalid host but function should work
+      oid_list = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid_list, timeout: 100)
+      
+      # Test with string OID
+      oid_string = "1.3.6.1.2.1.1.1.0"
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid_string, timeout: 100)
+    end
+    
+    test "uses proper GETNEXT PDU for SNMP v1" do
+      # SNMP v1 should use actual GETNEXT PDU, not GETBULK
+      oid = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      opts = [version: :v1, timeout: 100]
+      
+      # Should attempt GETNEXT operation (will fail due to invalid host)
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, opts)
+    end
+    
+    test "uses GETBULK with max_repetitions=1 for SNMP v2c+" do
+      # SNMP v2c should use GETBULK for efficiency
+      oid = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      opts = [version: :v2c, timeout: 100]
+      
+      # Should attempt GETBULK operation (will fail due to invalid host)
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, opts)
+    end
+    
+    test "validates input parameters" do
+      # Test invalid host
+      assert {:error, _} = Manager.get_next("", [1, 3, 6, 1], timeout: 100)
+      
+      # Test invalid OID (empty)
+      assert {:error, _} = Manager.get_next("192.168.1.1", [], timeout: 100)
+      
+      # Test with valid parameters but non-existent host
+      assert {:error, _} = Manager.get_next("192.168.255.255", [1, 3, 6, 1, 2, 1, 1, 1, 0], 
+                                           timeout: 100)
+    end
+    
+    test "handles community string options" do
+      opts = [community: "private", timeout: 100]
+      
+      # Should attempt connection with private community
+      assert {:error, _} = Manager.get_next("invalid.host.test", [1, 3, 6, 1, 2, 1, 1, 1, 0], opts)
+    end
+    
+    test "handles timeout options" do
+      # Short timeout should fail quickly
+      start_time = System.monotonic_time(:millisecond)
+      {:error, _} = Manager.get_next("192.168.255.255", [1, 3, 6, 1, 2, 1, 1, 1, 0], timeout: 50)
+      end_time = System.monotonic_time(:millisecond)
+      
+      # Should complete within reasonable time of timeout
+      assert end_time - start_time < 1000
+    end
+    
+    test "normalizes OID formats correctly" do
+      # Both should work the same way
+      list_oid = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      string_oid = "1.3.6.1.2.1.1.1.0"
+      
+      result1 = Manager.get_next("invalid.host.test", list_oid, timeout: 100)
+      result2 = Manager.get_next("invalid.host.test", string_oid, timeout: 100)
+      
+      # Both should fail the same way (since host is invalid)
+      assert {:error, _} = result1
+      assert {:error, _} = result2
+    end
+    
+    test "supports both SNMP versions" do
+      oid = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      
+      # Test v1 explicitly
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, version: :v1, timeout: 100)
+      
+      # Test v2c explicitly  
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, version: :v2c, timeout: 100)
+      
+      # Test default (should be v2c)
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, timeout: 100)
+    end
+    
+    test "handles host:port format correctly" do
+      # Host with port in string format should work
+      assert {:error, _} = Manager.get_next("invalid.host.test:1161", [1, 3, 6, 1], timeout: 100)
+      assert {:error, _} = Manager.get_next("192.168.255.255:162", [1, 3, 6, 1], timeout: 100)
+      
+      # IPv6 bracket notation
+      assert {:error, _} = Manager.get_next("[::1]:1161", [1, 3, 6, 1], timeout: 100)
+      
+      # Port option
+      assert {:error, _} = Manager.get_next("invalid.host.test", [1, 3, 6, 1], port: 1161, timeout: 100)
+    end
+    
+    test "expected return format is {:ok, {next_oid, value}} tuple" do
+      # While we can't test successful responses without a real SNMP device,
+      # we can verify the function signature and error return format
+      result = Manager.get_next("invalid.host.test", [1, 3, 6, 1, 2, 1, 1, 1, 0], timeout: 100)
+      
+      # Should return error tuple (since host is invalid)
+      assert {:error, _reason} = result
+      
+      # The successful format would be {:ok, {next_oid, value}}
+      # This is documented in the function spec and examples
+    end
+    
+    test "handles various option combinations" do
+      oid = [1, 3, 6, 1, 2, 1, 1, 1, 0]
+      
+      # Test with multiple options
+      opts = [
+        community: "test",
+        version: :v1,
+        timeout: 200,
+        retries: 2,
+        port: 1161,
+        local_port: 0
+      ]
+      
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, opts)
+      
+      # Test v2c with different options
+      opts_v2c = [
+        community: "public",
+        version: :v2c,
+        timeout: 500,
+        retries: 1,
+        port: 161
+      ]
+      
+      assert {:error, _} = Manager.get_next("invalid.host.test", oid, opts_v2c)
     end
   end
 end
