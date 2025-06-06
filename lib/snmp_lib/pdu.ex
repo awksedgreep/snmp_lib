@@ -6,6 +6,73 @@ defmodule SnmpLib.PDU do
   multiple SNMP implementations. Supports SNMPv1 and SNMPv2c protocols with
   high-performance encoding/decoding, robust error handling, and full RFC compliance.
   
+  ## API Documentation
+  
+  ### PDU Structure
+  
+  All PDU functions in this library use a **consistent map structure** with these fields:
+  
+  ```elixir
+  %{
+    type: :get_request | :get_next_request | :get_response | :set_request | :get_bulk_request,
+    request_id: non_neg_integer(),
+    error_status: 0..5,
+    error_index: non_neg_integer(),
+    varbinds: [varbind()],
+    # GETBULK only:
+    non_repeaters: non_neg_integer(),      # Optional, GETBULK requests only
+    max_repetitions: non_neg_integer()     # Optional, GETBULK requests only
+  }
+  ```
+  
+  **IMPORTANT**: Always use the `:type` field (not `:pdu_type`) with atom values.
+  
+  ### Variable Bindings Format
+  
+  Variable bindings (`varbinds`) support two formats:
+  
+  - **2-tuple format**: `{oid, value}` - Used for responses and simple cases
+  - **3-tuple format**: `{oid, type, value}` - Used for requests with explicit type info
+  
+  ```elixir
+  # Request varbinds (3-tuple with type information)
+  [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :null, :null}]
+  
+  # Response varbinds (2-tuple format)  
+  [{[1, 3, 6, 1, 2, 1, 1, 1, 0], "Linux server"}]
+  
+  # Response varbinds (3-tuple format also supported)
+  [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :octet_string, "Linux server"}]
+  ```
+  
+  ### Message Structure
+  
+  SNMP messages have this structure:
+  
+  ```elixir
+  %{
+    version: 0 | 1,                    # 0 = SNMPv1, 1 = SNMPv2c
+    community: binary(),               # Community string as binary
+    pdu: pdu()                        # PDU map as defined above
+  }
+  ```
+  
+  ### Function Usage Patterns
+  
+  ```elixir
+  # 1. Build a PDU
+  pdu = SnmpLib.PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 12345)
+  
+  # 2. Build a complete message
+  message = SnmpLib.PDU.build_message(pdu, "public", :v2c)
+  
+  # 3. Encode to binary
+  {:ok, binary} = SnmpLib.PDU.encode_message(message)
+  
+  # 4. Decode from binary
+  {:ok, decoded_message} = SnmpLib.PDU.decode_message(binary)
+  ```
+  
   ## Features
   
   - Pure Elixir ASN.1 BER encoding/decoding
@@ -35,6 +102,15 @@ defmodule SnmpLib.PDU do
   
       # Build and encode a GET request
       iex> pdu = SnmpLib.PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 12345)
+      iex> pdu.type
+      :get_request
+      iex> pdu.request_id
+      12345
+      iex> length(pdu.varbinds)
+      1
+      
+      # Build message and encode
+      iex> pdu = SnmpLib.PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 99)
       iex> message = SnmpLib.PDU.build_message(pdu, "public", :v2c)
       iex> {:ok, encoded} = SnmpLib.PDU.encode_message(message)
       iex> is_binary(encoded)
@@ -122,18 +198,20 @@ defmodule SnmpLib.PDU do
     pdu: pdu()
   }
 
-  # For backward compatibility with SnmpSim
-  defstruct [
-    :version,
-    :community,
-    :pdu_type,
-    :request_id,
-    :error_status,
-    :error_index,
-    :variable_bindings,
-    :non_repeaters,
-    :max_repetitions
-  ]
+  # IMPORTANT: This module does NOT define a struct. All functions work with plain maps.
+  # The canonical PDU format uses the :type field (not :pdu_type) with atom values.
+  # 
+  # If you need backward compatibility with code expecting :pdu_type field,
+  # you can convert using: Map.put(pdu, :pdu_type, pdu.type)
+  #
+  # Canonical PDU map structure:
+  # %{
+  #   type: :get_request | :get_next_request | :get_response | :set_request | :get_bulk_request,
+  #   request_id: integer(),
+  #   error_status: integer(),  
+  #   error_index: integer(),
+  #   varbinds: [varbind()]
+  # }
 
   ## Public API
 
@@ -371,18 +449,15 @@ defmodule SnmpLib.PDU do
   """
   @spec create_error_response(pdu(), error_status(), non_neg_integer()) :: pdu()
   def create_error_response(request_pdu, error_status, error_index \\ 0) do
-    # Handle both PDU struct and map formats
+    # Handle PDU map format - all PDUs are maps with :type field
     case request_pdu do
-      %__MODULE__{} = pdu ->
-        # PDU struct format
-        %__MODULE__{
-          version: pdu.version,
-          community: pdu.community,
-          pdu_type: 0xA2,  # GET_RESPONSE
-          request_id: pdu.request_id,
+      %{type: _type, request_id: request_id, varbinds: varbinds} ->
+        %{
+          type: :get_response,
+          request_id: request_id,
           error_status: error_status,
           error_index: error_index,
-          variable_bindings: pdu.variable_bindings || []
+          varbinds: varbinds
         }
       _ ->
         # Legacy map format for backward compatibility
@@ -401,77 +476,84 @@ defmodule SnmpLib.PDU do
   """
   @spec validate(pdu()) :: {:ok, pdu()} | {:error, atom()}
   def validate(pdu) when is_map(pdu) do
-    with :ok <- validate_pdu_type(pdu),
-         :ok <- validate_pdu_request_id(pdu),
-         :ok <- validate_pdu_varbinds(pdu),
-         :ok <- validate_pdu_bulk_fields(pdu) do
-      {:ok, pdu}
+    # First check if we have a type field
+    case Map.get(pdu, :type) do
+      nil -> {:error, :missing_required_fields}
+      type ->
+        # Validate the type first
+        case validate_pdu_type_only(type) do
+          :ok ->
+            # Now check required fields based on type
+            basic_fields = [:request_id, :varbinds]
+            case Enum.all?(basic_fields, &Map.has_key?(pdu, &1)) do
+              false -> {:error, :missing_required_fields}
+              true ->
+                case type do
+                  :get_bulk_request ->
+                    bulk_fields = [:non_repeaters, :max_repetitions]
+                    case Enum.all?(bulk_fields, &Map.has_key?(pdu, &1)) do
+                      true -> {:ok, pdu}
+                      false -> {:error, :missing_bulk_fields}
+                    end
+                  _ ->
+                    # Standard PDUs need error_status and error_index
+                    standard_fields = [:error_status, :error_index]
+                    case Enum.all?(standard_fields, &Map.has_key?(pdu, &1)) do
+                      true -> {:ok, pdu}
+                      false -> {:error, :missing_required_fields}
+                    end
+                end
+            end
+          :error -> {:error, :invalid_pdu_type}
+        end
     end
   end
   def validate(_), do: {:error, :invalid_pdu_format}
 
-  # Backward compatibility functions for SnmpSim
-
-  @doc """
-  Decodes an SNMP packet (alias for decode_message/1).
-  """
-  @spec decode(binary()) :: {:ok, %__MODULE__{}} | {:error, atom()}
-  def decode(binary_packet) when is_binary(binary_packet) do
-    case decode_message(binary_packet) do
-      {:ok, %{version: version, community: community, pdu: pdu}} ->
-        # Convert to legacy struct format
-        legacy_pdu = %__MODULE__{
-          version: version,
-          community: community,
-          pdu_type: pdu_type_to_tag(Map.get(pdu, :type)),
-          request_id: Map.get(pdu, :request_id),
-          error_status: Map.get(pdu, :error_status, 0),
-          error_index: Map.get(pdu, :error_index, 0),
-          variable_bindings: convert_varbinds_to_legacy(Map.get(pdu, :varbinds, [])),
-          non_repeaters: Map.get(pdu, :non_repeaters),
-          max_repetitions: Map.get(pdu, :max_repetitions)
-        }
-        {:ok, legacy_pdu}
-      {:error, reason} -> {:error, reason}
+  # Helper function to validate PDU type
+  defp validate_pdu_type_only(type) do
+    case type do
+      :get_request -> :ok
+      :get_next_request -> :ok
+      :get_response -> :ok
+      :set_request -> :ok
+      :get_bulk_request -> :ok
+      :inform_request -> :ok
+      :snmpv2_trap -> :ok
+      :report -> :ok
+      _ -> :error
     end
   end
 
   @doc """
-  Encodes an SNMP PDU to binary format (alias for encode_message/1).
+  Decodes an SNMP packet (alias for decode_message/1).
+  
+  Returns the canonical map format, not a struct.
   """
-  @spec encode(%__MODULE__{}) :: {:ok, binary()} | {:error, atom()}
-  def encode(%__MODULE__{} = legacy_pdu) do
-    # Convert from legacy struct format
-    pdu = %{
-      type: tag_to_pdu_type(legacy_pdu.pdu_type),
-      request_id: legacy_pdu.request_id,
-      error_status: legacy_pdu.error_status || @no_error,
-      error_index: legacy_pdu.error_index || 0,
-      varbinds: convert_legacy_varbinds(legacy_pdu.variable_bindings || []),
-      non_repeaters: legacy_pdu.non_repeaters,
-      max_repetitions: legacy_pdu.max_repetitions
-    }
-    
-    message = %{
-      version: legacy_pdu.version,
-      community: legacy_pdu.community,
-      pdu: pdu
-    }
-    
+  @spec decode(binary()) :: {:ok, message()} | {:error, atom()}
+  def decode(binary_packet) when is_binary(binary_packet) do
+    decode_message(binary_packet)
+  end
+
+  @doc """
+  Encodes an SNMP message to binary format (alias for encode_message/1).
+  """
+  @spec encode(message()) :: {:ok, binary()} | {:error, atom()}
+  def encode(message) when is_map(message) do
     encode_message(message)
   end
 
   @doc """
   Alias for decode/1.
   """
-  @spec decode_snmp_packet(binary()) :: {:ok, %__MODULE__{}} | {:error, atom()}
+  @spec decode_snmp_packet(binary()) :: {:ok, message()} | {:error, atom()}
   def decode_snmp_packet(binary_packet), do: decode(binary_packet)
 
   @doc """
   Alias for encode/1.
   """
-  @spec encode_snmp_packet(%__MODULE__{}) :: {:ok, binary()} | {:error, atom()}
-  def encode_snmp_packet(pdu), do: encode(pdu)
+  @spec encode_snmp_packet(message()) :: {:ok, binary()} | {:error, atom()}
+  def encode_snmp_packet(message), do: encode(message)
 
   ## Private Implementation
 
@@ -513,54 +595,14 @@ defmodule SnmpLib.PDU do
   end
 
   # PDU validation helpers
-  defp validate_pdu_type(%{type: type}) when type in [:get_request, :get_next_request, :get_response, :set_request, :get_bulk_request] do
-    :ok
-  end
-  defp validate_pdu_type(_), do: {:error, :invalid_pdu_type}
-
-  defp validate_pdu_request_id(%{request_id: request_id}) when is_integer(request_id) and request_id >= 0 and request_id <= 2_147_483_647 do
-    :ok
-  end
-  defp validate_pdu_request_id(_), do: {:error, :invalid_request_id}
-
-  defp validate_pdu_varbinds(%{varbinds: varbinds}) when is_list(varbinds) do
-    case validate_varbinds_format(varbinds) do
-      :ok -> :ok
-      {:error, _} -> {:error, :invalid_varbinds}
-    end
-  end
-  defp validate_pdu_varbinds(_), do: {:error, :missing_varbinds}
-
-  defp validate_pdu_bulk_fields(%{type: :get_bulk_request, non_repeaters: nr, max_repetitions: mr}) 
-    when is_integer(nr) and nr >= 0 and is_integer(mr) and mr >= 0 do
-    :ok
-  end
-  defp validate_pdu_bulk_fields(%{type: :get_bulk_request}) do
-    {:error, :missing_bulk_fields}
-  end
-  defp validate_pdu_bulk_fields(_), do: :ok
-
-  # Normalization helpers
   defp normalize_oid(oid) when is_list(oid), do: oid
   defp normalize_oid(oid) when is_binary(oid) do
     case SnmpLib.OID.string_to_list(oid) do
       {:ok, oid_list} -> oid_list
-      {:error, _} -> parse_oid_string_fallback(oid)
+      {:error, _} -> [1, 3, 6, 1]  # Safe default only on parse error
     end
   end
-  defp normalize_oid(_), do: [1, 3, 6, 1]  # Safe default
-
-  defp parse_oid_string_fallback(oid_string) do
-    case String.split(oid_string, ".") do
-      parts when length(parts) > 1 ->
-        try do
-          Enum.map(parts, &String.to_integer/1)
-        rescue
-          ArgumentError -> [1, 3, 6, 1]
-        end
-      _ -> [1, 3, 6, 1]
-    end
-  end
+  defp normalize_oid(_), do: [1, 3, 6, 1]  # Safe default for invalid types
 
   defp normalize_version(:v1), do: 0
   defp normalize_version(:v2c), do: 1
@@ -570,63 +612,22 @@ defmodule SnmpLib.PDU do
   defp normalize_version(_), do: 0
 
   # Legacy conversion helpers
-  defp pdu_type_to_tag(:get_request), do: @get_request
-  defp pdu_type_to_tag(:get_next_request), do: @getnext_request
-  defp pdu_type_to_tag(:get_response), do: @get_response
-  defp pdu_type_to_tag(:set_request), do: @set_request
-  defp pdu_type_to_tag(:get_bulk_request), do: @getbulk_request
-  defp pdu_type_to_tag(_), do: @get_request
-
-  defp tag_to_pdu_type(@get_request), do: :get_request
-  defp tag_to_pdu_type(@getnext_request), do: :get_next_request
-  defp tag_to_pdu_type(@get_response), do: :get_response
-  defp tag_to_pdu_type(@set_request), do: :set_request
-  defp tag_to_pdu_type(@getbulk_request), do: :get_bulk_request
-  defp tag_to_pdu_type(_), do: :get_request
-
-  defp convert_varbinds_to_legacy(varbinds) do
-    Enum.map(varbinds, fn
-      {oid, value} -> {normalize_oid_for_legacy(oid), value}
-      {oid, _type, value} -> {normalize_oid_for_legacy(oid), value}
-      other -> other
-    end)
-  end
-
-  defp convert_legacy_varbinds(varbinds) do
-    Enum.map(varbinds, fn
-      {oid, value} -> {normalize_oid(oid), :auto, value}
-      other -> other
-    end)
-  end
-
-  defp normalize_oid_for_legacy(oid) when is_list(oid) do
-    case SnmpLib.OID.list_to_string(oid) do
-      {:ok, oid_string} -> oid_string
-      {:error, _} -> Enum.join(oid, ".")
-    end
-  end
-  defp normalize_oid_for_legacy(oid), do: oid
-
-  # Fast encoding implementation (from SnmpMgr)
-  defp encode_snmp_message_fast(version, community, pdu) when is_binary(community) do
-    version_int = normalize_version(version)
-    
+  defp encode_snmp_message_fast(version, community, pdu) when is_integer(version) and is_binary(community) and is_map(pdu) do
     case encode_pdu_fast(pdu) do
-      {:ok, encoded_pdu} ->
+      {:ok, pdu_encoded} ->
         iodata = [
-          encode_integer_fast(version_int),
+          encode_integer_fast(version),
           encode_octet_string_fast(community),
-          encoded_pdu
+          pdu_encoded
         ]
         
         content = :erlang.iolist_to_binary(iodata)
         {:ok, encode_sequence_ber(content)}
         
-      {:error, reason} ->
-        {:error, reason}
+      {:error, reason} -> {:error, reason}
     end
   end
-  defp encode_snmp_message_fast(_, _, _), do: {:error, :invalid_community}
+  defp encode_snmp_message_fast(_, _, _), do: {:error, :invalid_message_format}
 
   defp encode_pdu_fast(%{type: :get_request} = pdu), do: encode_standard_pdu_fast(pdu, @get_request)
   defp encode_pdu_fast(%{type: :get_next_request} = pdu), do: encode_standard_pdu_fast(pdu, @getnext_request)
@@ -780,7 +781,7 @@ defmodule SnmpLib.PDU do
     end
   end
   
-  # Handle tuple formats from decoder  
+  # Handle tuple formats from decoder
   defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 do
     encode_unsigned_integer(@counter32, value)
   end
@@ -823,7 +824,6 @@ defmodule SnmpLib.PDU do
       _ -> <<@null, 0x00>>
     end
   end
-  defp encode_snmp_value_fast(:auto, {:unknown, value}) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:end_of_mib_view, _), do: <<@end_of_mib_view, 0x00>>
@@ -945,6 +945,53 @@ defmodule SnmpLib.PDU do
     end
   end
 
+  # Comprehensive decoding implementation (from SnmpSim)
+  defp decode_snmp_message_comprehensive(<<0x30, rest::binary>>) do
+    case parse_ber_length(rest) do
+      {:ok, {_content_length, content}} ->
+        case parse_snmp_message_fields(content) do
+          {:ok, {version, community, pdu_data}} ->
+            case parse_pdu_comprehensive(pdu_data) do
+              {:ok, pdu} -> 
+                {:ok, %{
+                  version: version,
+                  community: community,
+                  pdu: pdu
+                }}
+              {:error, reason} -> {:error, {:pdu_parse_error, reason}}
+            end
+          {:error, reason} -> {:error, {:message_parse_error, reason}}
+        end
+      {:error, reason} -> {:error, {:message_parse_error, reason}}
+    end
+  end
+  defp decode_snmp_message_comprehensive(_), do: {:error, :invalid_message_format}
+
+  defp parse_ber_length(<<length, rest::binary>>) when length < 128 do
+    if byte_size(rest) >= length do
+      content = binary_part(rest, 0, length)
+      {:ok, {length, content}}
+    else
+      {:error, :insufficient_data}
+    end
+  end
+  defp parse_ber_length(<<length_of_length, rest::binary>>) when length_of_length >= 128 do
+    num_length_bytes = length_of_length - 128
+    if num_length_bytes > 0 and num_length_bytes <= 4 and byte_size(rest) >= num_length_bytes do
+      <<length_bytes::binary-size(num_length_bytes), remaining::binary>> = rest
+      actual_length = :binary.decode_unsigned(length_bytes, :big)
+      
+      if byte_size(remaining) >= actual_length do
+        content = binary_part(remaining, 0, actual_length)
+        {:ok, {actual_length, content}}
+      else
+        {:error, :insufficient_data}
+      end
+    else
+      {:error, :invalid_length_encoding}
+    end
+  end
+  defp parse_ber_length(_), do: {:error, :invalid_length_format}  
   defp encode_oid_fast(oid_list) when is_list(oid_list) and length(oid_list) >= 2 do
     [first, second | rest] = oid_list
     
@@ -1004,53 +1051,6 @@ defmodule SnmpLib.PDU do
     [first ||| 0x80 | set_high_bits(rest)]  # Set high bit on all but last
   end
 
-  # Comprehensive decoding implementation (from SnmpSim)
-  defp decode_snmp_message_comprehensive(<<0x30, rest::binary>>) do
-    case parse_ber_length(rest) do
-      {:ok, {_content_length, content}} ->
-        case parse_snmp_message_fields(content) do
-          {:ok, {version, community, pdu_data}} ->
-            case parse_pdu_comprehensive(pdu_data) do
-              {:ok, pdu} -> 
-                {:ok, %{
-                  version: version,
-                  community: community,
-                  pdu: pdu
-                }}
-              {:error, reason} -> {:error, {:pdu_parse_error, reason}}
-            end
-          {:error, reason} -> {:error, {:message_parse_error, reason}}
-        end
-      {:error, reason} -> {:error, {:message_parse_error, reason}}
-    end
-  end
-  defp decode_snmp_message_comprehensive(_), do: {:error, :invalid_message_format}
-
-  defp parse_ber_length(<<length, rest::binary>>) when length < 128 do
-    if byte_size(rest) >= length do
-      content = binary_part(rest, 0, length)
-      {:ok, {length, content}}
-    else
-      {:error, :insufficient_data}
-    end
-  end
-  defp parse_ber_length(<<length_of_length, rest::binary>>) when length_of_length >= 128 do
-    num_length_bytes = length_of_length - 128
-    if num_length_bytes > 0 and num_length_bytes <= 4 and byte_size(rest) >= num_length_bytes do
-      <<length_bytes::binary-size(num_length_bytes), remaining::binary>> = rest
-      actual_length = :binary.decode_unsigned(length_bytes, :big)
-      
-      if byte_size(remaining) >= actual_length do
-        content = binary_part(remaining, 0, actual_length)
-        {:ok, {actual_length, content}}
-      else
-        {:error, :insufficient_data}
-      end
-    else
-      {:error, :invalid_length_encoding}
-    end
-  end
-  defp parse_ber_length(_), do: {:error, :invalid_length_format}
 
   defp parse_snmp_message_fields(data) do
     with {:ok, {version, rest1}} <- parse_integer(data),

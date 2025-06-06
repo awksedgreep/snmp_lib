@@ -252,6 +252,305 @@ defmodule SnmpLib do
       iex> exception_val
       {:no_such_object, nil}
       
+  ## Real-World Integration Examples
+  
+  ### Network Monitoring System
+  
+      # Monitor multiple devices with error handling
+      defmodule NetworkMonitor do
+        def poll_devices(device_list, community \\ "public") do
+          device_list
+          |> Task.async_stream(fn device ->
+            case SnmpLib.Manager.get(device, "1.3.6.1.2.1.1.3.0", 
+                                     community: community, timeout: 5000) do
+              {:ok, uptime} -> {device, :ok, uptime}
+              {:error, reason} -> {device, :error, reason}
+            end
+          end, max_concurrency: 10, timeout: 10_000)
+          |> Enum.map(fn {:ok, result} -> result end)
+        end
+        
+        def get_interface_stats(device, community \\ "public") do
+          base_oid = [1, 3, 6, 1, 2, 1, 2, 2, 1]
+          
+          # Get interface table using GETBULK
+          case SnmpLib.Manager.get_bulk(device, base_oid, 
+                                        community: community, 
+                                        max_repetitions: 50) do
+            {:ok, varbinds} ->
+              varbinds
+              |> Enum.group_by(fn {oid, _value} -> 
+                # Group by interface index (last component)
+                List.last(oid)
+              end)
+              |> Enum.map(fn {if_index, binds} ->
+                %{
+                  interface: if_index,
+                  stats: parse_interface_binds(binds)
+                }
+              end)
+              
+            {:error, reason} -> {:error, reason}
+          end
+        end
+        
+        defp parse_interface_binds(binds) do
+          Enum.reduce(binds, %{}, fn {oid, value}, acc ->
+            case oid do
+              [1, 3, 6, 1, 2, 1, 2, 2, 1, 10, _] -> Map.put(acc, :in_octets, value)
+              [1, 3, 6, 1, 2, 1, 2, 2, 1, 16, _] -> Map.put(acc, :out_octets, value)
+              [1, 3, 6, 1, 2, 1, 2, 2, 1, 2, _] -> Map.put(acc, :description, value)
+              _ -> acc
+            end
+          end)
+        end
+      end
+      
+      # Usage example
+      devices = ["192.168.1.1", "192.168.1.2", "192.168.1.3"]
+      results = NetworkMonitor.poll_devices(devices, "monitoring")
+      
+  ### SNMP Agent Simulator
+  
+      # Build custom SNMP responses for testing
+      defmodule SnmpSimulator do
+        def create_system_response(request_id, community) do
+          # Build response with system information
+          varbinds = [
+            {[1, 3, 6, 1, 2, 1, 1, 1, 0], "Linux Test Server"},
+            {[1, 3, 6, 1, 2, 1, 1, 2, 0], [1, 3, 6, 1, 4, 1, 8072]},
+            {[1, 3, 6, 1, 2, 1, 1, 3, 0], 123456789}
+          ]
+          
+          response_pdu = SnmpLib.PDU.build_response(request_id, 0, 0, varbinds)
+          message = SnmpLib.PDU.build_message(response_pdu, community, :v2c)
+          
+          case SnmpLib.PDU.encode_message(message) do
+            {:ok, encoded} -> {:ok, encoded}
+            {:error, reason} -> {:error, reason}
+          end
+        end
+        
+        def handle_bulk_request(request_pdu, community) do
+          # Simulate interface table response
+          base_oid = [1, 3, 6, 1, 2, 1, 2, 2, 1]
+          max_reps = request_pdu.max_repetitions
+          
+          varbinds = for i <- 1..max_reps do
+            [
+              {base_oid ++ [2, i], "eth" <> Integer.to_string(i)},           # ifDescr
+              {base_oid ++ [10, i], :rand.uniform(1000000)}, # ifInOctets
+              {base_oid ++ [16, i], :rand.uniform(1000000)}  # ifOutOctets
+            ]
+          end |> List.flatten()
+          
+          response_pdu = SnmpLib.PDU.build_response(
+            request_pdu.request_id, 0, 0, varbinds
+          )
+          
+          message = SnmpLib.PDU.build_message(response_pdu, community, :v2c)
+          SnmpLib.PDU.encode_message(message)
+        end
+      end
+      
+  ### High-Performance Data Collection
+  
+      # Efficient bulk data collection with connection reuse
+      defmodule PerformanceCollector do
+        def collect_interface_data(devices, opts \\ []) do
+          concurrency = Keyword.get(opts, :concurrency, 20)
+          timeout = Keyword.get(opts, :timeout, 5000)
+          community = Keyword.get(opts, :community, "public")
+          
+          start_time = System.monotonic_time(:microsecond)
+          
+          results = devices
+          |> Task.async_stream(fn device ->
+            collect_device_interfaces(device, community, timeout)
+          end, max_concurrency: concurrency, timeout: timeout + 1000)
+          |> Enum.map(fn 
+            {:ok, result} -> result
+            {:exit, reason} -> {:error, {:timeout, reason}}
+          end)
+          
+          end_time = System.monotonic_time(:microsecond)
+          duration_ms = (end_time - start_time) / 1000
+          
+          %{
+            results: results,
+            performance: %{
+              total_devices: length(devices),
+              duration_ms: duration_ms,
+              devices_per_second: length(devices) / (duration_ms / 1000),
+              success_rate: calculate_success_rate(results)
+            }
+          }
+        end
+        
+        defp collect_device_interfaces(device, community, timeout) do
+          # Use GETBULK for efficient table walking
+          case SnmpLib.Manager.get_bulk(
+            device, 
+            [1, 3, 6, 1, 2, 1, 2, 2, 1, 2], # ifDescr table
+            community: community,
+            timeout: timeout,
+            max_repetitions: 100
+          ) do
+            {:ok, varbinds} -> 
+              {:ok, %{device: device, interface_count: length(varbinds), data: varbinds}}
+            {:error, reason} -> 
+              {:error, %{device: device, reason: reason}}
+          end
+        end
+        
+        defp calculate_success_rate(results) do
+          total = length(results)
+          successes = Enum.count(results, fn
+            {:ok, _} -> true
+            _ -> false
+          end)
+          
+          if total > 0, do: (successes / total) * 100, else: 0
+        end
+      end
+      
+  ## Performance Benchmarking Examples
+  
+  ### Encoding/Decoding Performance
+  
+      # Benchmark PDU encoding performance
+      defmodule SnmpBenchmark do
+        def benchmark_encoding(iterations \\ 10_000) do
+          # Prepare test data
+          pdu = SnmpLib.PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 12345)
+          message = SnmpLib.PDU.build_message(pdu, "public", :v2c)
+          
+          # Benchmark encoding
+          {encode_time, _} = :timer.tc(fn ->
+            for _ <- 1..iterations do
+              {:ok, _encoded} = SnmpLib.PDU.encode_message(message)
+            end
+          end)
+          
+          # Encode once for decoding benchmark
+          {:ok, encoded} = SnmpLib.PDU.encode_message(message)
+          
+          # Benchmark decoding
+          {decode_time, _} = :timer.tc(fn ->
+            for _ <- 1..iterations do
+              {:ok, _decoded} = SnmpLib.PDU.decode_message(encoded)
+            end
+          end)
+          
+          %{
+            iterations: iterations,
+            encode_time_ms: encode_time / 1000,
+            decode_time_ms: decode_time / 1000,
+            encode_ops_per_sec: iterations / (encode_time / 1_000_000),
+            decode_ops_per_sec: iterations / (decode_time / 1_000_000),
+            encode_time_per_op_us: encode_time / iterations,
+            decode_time_per_op_us: decode_time / iterations
+          }
+        end
+        
+        def benchmark_bulk_operations(device_count \\ 100) do
+          devices = for i <- 1..device_count, do: "192.168.1." <> Integer.to_string(i)
+          
+          # Benchmark sequential operations
+          {seq_time, seq_results} = :timer.tc(fn ->
+            Enum.map(devices, fn device ->
+              SnmpLib.Manager.get(device, [1, 3, 6, 1, 2, 1, 1, 3, 0], timeout: 100)
+            end)
+          end)
+          
+          # Benchmark concurrent operations
+          {conc_time, conc_results} = :timer.tc(fn ->
+            devices
+            |> Task.async_stream(fn device ->
+              SnmpLib.Manager.get(device, [1, 3, 6, 1, 2, 1, 1, 3, 0], timeout: 100)
+            end, max_concurrency: 50, timeout: 1000)
+            |> Enum.map(fn {:ok, result} -> result end)
+          end)
+          
+          %{
+            device_count: device_count,
+            sequential: %{
+              time_ms: seq_time / 1000,
+              ops_per_sec: device_count / (seq_time / 1_000_000),
+              success_count: count_successes(seq_results)
+            },
+            concurrent: %{
+              time_ms: conc_time / 1000,
+              ops_per_sec: device_count / (conc_time / 1_000_000),
+              success_count: count_successes(conc_results),
+              speedup: seq_time / conc_time
+            }
+          }
+        end
+        
+        def benchmark_oid_operations(iterations \\ 100_000) do
+          test_oids = [
+            "1.3.6.1.2.1.1.1.0",
+            "1.3.6.1.4.1.8072.1.3.2.3.1.2.8.110.101.116.45.115.110.109.112",
+            "1.3.6.1.2.1.2.2.1.10.1000"
+          ]
+          
+          results = for oid_string <- test_oids do
+            # Benchmark string to list conversion
+            {str_to_list_time, _} = :timer.tc(fn ->
+              for _ <- 1..iterations do
+                {:ok, _list} = SnmpLib.OID.string_to_list(oid_string)
+              end
+            end)
+            
+            # Convert once for reverse benchmark
+            {:ok, oid_list} = SnmpLib.OID.string_to_list(oid_string)
+            
+            # Benchmark list to string conversion
+            {list_to_str_time, _} = :timer.tc(fn ->
+              for _ <- 1..iterations do
+                {:ok, _string} = SnmpLib.OID.list_to_string(oid_list)
+              end
+            end)
+            
+            %{
+              oid: oid_string,
+              oid_length: length(oid_list),
+              str_to_list_us_per_op: str_to_list_time / iterations,
+              list_to_str_us_per_op: list_to_str_time / iterations,
+              str_to_list_ops_per_sec: iterations / (str_to_list_time / 1_000_000),
+              list_to_str_ops_per_sec: iterations / (list_to_str_time / 1_000_000)
+            }
+          end
+          
+          %{
+            iterations: iterations,
+            oid_benchmarks: results,
+            average_str_to_list_us: Enum.reduce(results, 0, &(&1.str_to_list_us_per_op + &2)) / length(results),
+            average_list_to_str_us: Enum.reduce(results, 0, &(&1.list_to_str_us_per_op + &2)) / length(results)
+          }
+        end
+        
+        defp count_successes(results) do
+          Enum.count(results, fn
+            {:ok, _} -> true
+            _ -> false
+          end)
+        end
+      end
+      
+      # Example usage:
+      # encoding_perf = SnmpBenchmark.benchmark_encoding(50_000)
+      # IO.puts("Encoding: " <> Integer.to_string(trunc(encoding_perf.encode_ops_per_sec)) <> " ops/sec")
+      # IO.puts("Decoding: " <> Integer.to_string(trunc(encoding_perf.decode_ops_per_sec)) <> " ops/sec")
+      
+      # bulk_perf = SnmpBenchmark.benchmark_bulk_operations(200)
+      # IO.puts("Sequential: " <> Float.to_string(bulk_perf.sequential.time_ms) <> "ms")
+      # IO.puts("Concurrent: " <> Float.to_string(bulk_perf.concurrent.time_ms) <> "ms (" <> Float.to_string(bulk_perf.concurrent.speedup) <> "x faster)")
+      
+      # oid_perf = SnmpBenchmark.benchmark_oid_operations(100_000)
+      # IO.puts("Average OID conversion: " <> Float.to_string(oid_perf.average_str_to_list_us) <> "μs per operation")
+  
   ## RFC Compliance
   
   This library achieves 100% compliance with:

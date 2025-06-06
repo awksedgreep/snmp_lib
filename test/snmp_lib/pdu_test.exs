@@ -306,69 +306,6 @@ defmodule SnmpLib.PDUTest do
     end
   end
 
-  describe "Legacy compatibility (SnmpSim struct format)" do
-    test "decodes to legacy struct format" do
-      pdu = PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 12345)
-      message = PDU.build_message(pdu, "public", :v1)
-      {:ok, encoded} = PDU.encode_message(message)
-      
-      {:ok, legacy_pdu} = PDU.decode(encoded)
-      
-      assert %PDU{} = legacy_pdu
-      assert legacy_pdu.version == 0
-      assert legacy_pdu.community == "public"
-      assert legacy_pdu.pdu_type == 0xA0  # GET request tag
-      assert legacy_pdu.request_id == 12345
-      assert legacy_pdu.error_status == 0
-      assert legacy_pdu.error_index == 0
-      assert is_list(legacy_pdu.variable_bindings)
-    end
-
-    test "encodes from legacy struct format" do
-      legacy_pdu = %PDU{
-        version: 1,
-        community: "public",
-        pdu_type: 0xA0,
-        request_id: 54321,
-        error_status: 0,
-        error_index: 0,
-        variable_bindings: [{"1.3.6.1.2.1.1.1.0", nil}]
-      }
-      
-      {:ok, encoded} = PDU.encode(legacy_pdu)
-      assert is_binary(encoded)
-      assert byte_size(encoded) > 0
-      
-      # Verify it can be decoded back
-      {:ok, decoded} = PDU.decode_message(encoded)
-      assert decoded.version == 1
-      assert decoded.community == "public"
-      assert decoded.pdu.type == :get_request
-      assert decoded.pdu.request_id == 54321
-    end
-
-    test "provides legacy alias functions" do
-      pdu = PDU.build_get_request([1, 3, 6, 1], 123)
-      message = PDU.build_message(pdu, "public", :v1)
-      {:ok, encoded} = PDU.encode_message(message)
-      
-      # Test decode_snmp_packet alias
-      {:ok, decoded1} = PDU.decode_snmp_packet(encoded)
-      {:ok, decoded2} = PDU.decode(encoded)
-      assert decoded1 == decoded2
-      
-      # Test encode_snmp_packet alias
-      legacy_pdu = %PDU{
-        version: 0, community: "test", pdu_type: 0xA0,
-        request_id: 999, error_status: 0, error_index: 0,
-        variable_bindings: []
-      }
-      {:ok, encoded1} = PDU.encode_snmp_packet(legacy_pdu)
-      {:ok, encoded2} = PDU.encode(legacy_pdu)
-      assert encoded1 == encoded2
-    end
-  end
-
   describe "Performance and edge cases" do
     test "handles large request IDs" do
       large_id = 2_147_483_647  # Max 32-bit signed integer
