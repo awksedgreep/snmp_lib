@@ -306,7 +306,7 @@ defmodule SnmpLib.PDUTest do
     end
   end
 
-  describe "Legacy compatibility (SNMPSimEx struct format)" do
+  describe "Legacy compatibility (SnmpSim struct format)" do
     test "decodes to legacy struct format" do
       pdu = PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 12345)
       message = PDU.build_message(pdu, "public", :v1)

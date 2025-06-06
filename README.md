@@ -122,7 +122,7 @@ error_pdu = SnmpLib.PDU.create_error_response(request_pdu, 2, 1)
 
 ### Backward Compatibility
 
-For projects migrating from `SNMPSimEx`:
+For projects migrating from `SnmpSim`:
 
 ```elixir
 # Legacy struct support

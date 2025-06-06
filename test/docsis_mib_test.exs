@@ -193,7 +193,6 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, mib} = Parser.parse(mib_content)
-      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       object_type = List.first(mib.definitions)
@@ -213,7 +212,6 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, mib} = Parser.parse(mib_content)
-      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       oid_def = List.first(mib.definitions)
@@ -237,7 +235,6 @@ defmodule SnmpLib.DocsisMibTest do
       """
       
       {:ok, mib} = Parser.parse(mib_content)
-      {:ok, mib} = Parser.parse_tokens(tokens)
       
       assert length(mib.definitions) == 1
       textual_convention = List.first(mib.definitions)

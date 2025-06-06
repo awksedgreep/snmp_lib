@@ -122,7 +122,7 @@ defmodule SnmpLib.PDU do
     pdu: pdu()
   }
 
-  # For backward compatibility with SNMPSimEx
+  # For backward compatibility with SnmpSim
   defstruct [
     :version,
     :community,
@@ -410,7 +410,7 @@ defmodule SnmpLib.PDU do
   end
   def validate(_), do: {:error, :invalid_pdu_format}
 
-  # Backward compatibility functions for SNMPSimEx
+  # Backward compatibility functions for SnmpSim
 
   @doc """
   Decodes an SNMP packet (alias for decode_message/1).
@@ -607,7 +607,7 @@ defmodule SnmpLib.PDU do
   end
   defp normalize_oid_for_legacy(oid), do: oid
 
-  # Fast encoding implementation (from SNMPMgr)
+  # Fast encoding implementation (from SnmpMgr)
   defp encode_snmp_message_fast(version, community, pdu) when is_binary(community) do
     version_int = normalize_version(version)
     
@@ -734,6 +734,18 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:auto, :null), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(:integer, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:string, value) when is_binary(value), do: encode_octet_string_fast(value)
+  defp encode_snmp_value_fast(:counter32, value) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@counter32, value)
+  end
+  defp encode_snmp_value_fast(:gauge32, value) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@gauge32, value)
+  end
+  defp encode_snmp_value_fast(:timeticks, value) when is_integer(value) and value >= 0 do
+    encode_unsigned_integer(@timeticks, value)
+  end
+  defp encode_snmp_value_fast(:counter64, value) when is_integer(value) and value >= 0 do
+    encode_counter64(@counter64, value)
+  end
   defp encode_snmp_value_fast(:object_identifier, value) when is_list(value) do
     case encode_oid_fast(value) do
       {:ok, encoded} -> encoded
@@ -950,9 +962,7 @@ defmodule SnmpLib.PDU do
   end
   defp encode_oid_fast(_), do: {:error, :invalid_oid_format}
 
-  defp encode_oid_subids_fast([], acc) do
-    {:ok, :erlang.iolist_to_binary(Enum.reverse(acc))}
-  end
+  defp encode_oid_subids_fast([], acc), do: {:ok, :erlang.iolist_to_binary(Enum.reverse(acc))}
   defp encode_oid_subids_fast([subid | rest], acc) when subid >= 0 and subid < 128 do
     encode_oid_subids_fast(rest, [<<subid>> | acc])
   end
@@ -994,7 +1004,7 @@ defmodule SnmpLib.PDU do
     [first ||| 0x80 | set_high_bits(rest)]  # Set high bit on all but last
   end
 
-  # Comprehensive decoding implementation (from SNMPSimEx)
+  # Comprehensive decoding implementation (from SnmpSim)
   defp decode_snmp_message_comprehensive(<<0x30, rest::binary>>) do
     case parse_ber_length(rest) do
       {:ok, {_content_length, content}} ->

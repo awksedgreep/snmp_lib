@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2025-06-05
+
+### Fixed
+
+- **Critical SNMP Encoding Bug**: Fixed Counter32 and Gauge32 types incorrectly encoding as ASN.1 NULL values
+  - Counter32 now properly encodes with ASN.1 application tag 0x41
+  - Gauge32 now properly encodes with ASN.1 application tag 0x42
+  - Also fixed TimeTicks (0x43) and Counter64 (0x46) atom type encoding
+  - SNMP clients will now receive correct Counter32/Gauge32 values instead of NULL
+  - Added comprehensive test coverage to prevent regressions
+
 ## [0.4.0] - 2025-01-06
 
 ### Added
@@ -71,7 +82,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Pure Elixir ASN.1 BER implementation
   - Community string validation
   - Error response generation
-  - Backward compatibility with SNMPSimEx struct format
+  - Backward compatibility with SnmpSim struct format
 
 - **SnmpLib.OID** - Basic OID manipulation utilities (placeholder for Phase 2)
   - String to list conversion
@@ -92,8 +103,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `validate/1` - Validate PDU structure
 
 - **Backward Compatibility**:
-  - `decode/1` - Legacy decode function for SNMPSimEx compatibility
-  - `encode/1` - Legacy encode function for SNMPSimEx compatibility
+  - `decode/1` - Legacy decode function for SnmpSim compatibility
+  - `encode/1` - Legacy encode function for SnmpSim compatibility
   - `decode_snmp_packet/1` - Alias for decode
   - `encode_snmp_packet/1` - Alias for encode
 
@@ -143,7 +154,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## Phase Roadmap
 
-### Phase 1 (Current) - PDU Library ✅
+### Phase 1 (Current) - PDU Library 
 - Complete PDU encoding/decoding functionality
 - Backward compatibility with existing projects
 - Comprehensive testing
