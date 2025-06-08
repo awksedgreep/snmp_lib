@@ -172,7 +172,7 @@ defmodule SnmpLib.PDU do
   @type error_status :: 0..5
   @type oid :: [non_neg_integer()] | binary()
   @type snmp_value :: any()
-  @type varbind :: {oid(), snmp_value()} | {oid(), atom(), snmp_value()}
+  @type varbind :: {oid(), atom(), snmp_value()}
 
   # Error status code accessors
   def no_error, do: @no_error
@@ -735,6 +735,7 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:auto, :null), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(:integer, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:string, value) when is_binary(value), do: encode_octet_string_fast(value)
+  defp encode_snmp_value_fast(:octet_string, value) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:counter32, value) when is_integer(value) and value >= 0 do
     encode_unsigned_integer(@counter32, value)
   end
@@ -746,6 +747,13 @@ defmodule SnmpLib.PDU do
   end
   defp encode_snmp_value_fast(:counter64, value) when is_integer(value) and value >= 0 do
     encode_counter64(@counter64, value)
+  end
+  defp encode_snmp_value_fast(:ip_address, value) when is_binary(value) and byte_size(value) == 4 do
+    encode_tag_length_value(@ip_address, 4, value)
+  end
+  defp encode_snmp_value_fast(:opaque, value) when is_binary(value) do
+    length = byte_size(value)
+    encode_tag_length_value(@opaque_type, length, value)
   end
   defp encode_snmp_value_fast(:object_identifier, value) when is_list(value) do
     case encode_oid_fast(value) do
@@ -780,8 +788,6 @@ defmodule SnmpLib.PDU do
       <<@null, 0x00>>
     end
   end
-  
-  # Handle tuple formats from decoder
   defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 do
     encode_unsigned_integer(@counter32, value)
   end
@@ -801,66 +807,21 @@ defmodule SnmpLib.PDU do
     length = byte_size(value)
     encode_tag_length_value(@opaque_type, length, value)
   end
+  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_list(value) do
+    case encode_oid_fast(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_binary(value) do
+    encode_snmp_value_fast(:object_identifier, value)
+  end
   defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:object_identifier, oid}) when is_list(oid) do
-    case encode_oid_fast(oid) do
-      {:ok, encoded} -> encoded
-      {:error, _} -> <<@null, 0x00>>
-    end
-  end
-  defp encode_snmp_value_fast(:auto, {:object_identifier, oid}) when is_binary(oid) do
-    try do
-      case String.split(oid, ".") |> Enum.map(&String.to_integer/1) do
-        oid_list when is_list(oid_list) ->
-          case encode_oid_fast(oid_list) do
-            {:ok, encoded} -> encoded
-            {:error, _} -> <<@null, 0x00>>
-          end
-        _ -> <<@null, 0x00>>
-      end
-    rescue
-      _ -> <<@null, 0x00>>
-    end
-  end
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:end_of_mib_view, _), do: <<@end_of_mib_view, 0x00>>
-  
-  # Complex SNMP types
-  defp encode_snmp_value_fast({:object_identifier, oid}, _) when is_list(oid) do
-    case encode_oid_fast(oid) do
-      {:ok, encoded} -> encoded
-      {:error, _} -> <<@null, 0x00>>
-    end
-  end
-  defp encode_snmp_value_fast({:object_identifier, oid}, _) when is_binary(oid) do
-    case String.split(oid, ".") |> Enum.map(&String.to_integer/1) do
-      oid_list when is_list(oid_list) ->
-        case encode_oid_fast(oid_list) do
-          {:ok, encoded} -> encoded
-          {:error, _} -> <<@null, 0x00>>
-        end
-      _ -> <<@null, 0x00>>
-    end
-  rescue
-    _ -> <<@null, 0x00>>
-  end
-  defp encode_snmp_value_fast({:counter32, value}, _) when is_integer(value) and value >= 0 do
-    encode_unsigned_integer(@counter32, value)
-  end
-  defp encode_snmp_value_fast({:gauge32, value}, _) when is_integer(value) and value >= 0 do
-    encode_unsigned_integer(@gauge32, value)
-  end
-  defp encode_snmp_value_fast({:timeticks, value}, _) when is_integer(value) and value >= 0 do
-    encode_unsigned_integer(@timeticks, value)
-  end
-  defp encode_snmp_value_fast({:counter64, value}, _) when is_integer(value) and value >= 0 do
-    encode_counter64(@counter64, value)
-  end
-  
-  defp encode_snmp_value_fast(_, :null), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(_, _), do: <<@null, 0x00>>
 
   # ASN.1 BER encoding helpers
@@ -1209,8 +1170,8 @@ defmodule SnmpLib.PDU do
 
   defp parse_single_varbind(data) do
     with {:ok, {oid, rest1}} <- parse_oid(data),
-         {:ok, {value, _rest2}} <- parse_value(rest1) do
-      {:ok, {oid, :auto, value}}
+         {:ok, {type, value, _rest2}} <- parse_value_with_type(rest1) do
+      {:ok, {oid, type, value}}
     else
       _ -> {:error, :invalid_varbind}
     end
@@ -1253,41 +1214,52 @@ defmodule SnmpLib.PDU do
   end
   defp decode_oid_subid(<<>>, _), do: {:error, :incomplete_oid}
 
-  defp parse_value(<<@octet_string, length, value::binary-size(length), rest::binary>>) do
-    {:ok, {value, rest}}
+  defp parse_value_with_type(<<@octet_string, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:octet_string, value, rest}}
   end
-  defp parse_value(<<@integer, length, value_data::binary-size(length), rest::binary>>) do
+  defp parse_value_with_type(<<@integer, length, value_data::binary-size(length), rest::binary>>) do
     int_value = decode_integer_value(value_data)
-    {:ok, {int_value, rest}}
+    {:ok, {:integer, int_value, rest}}
   end
-  defp parse_value(<<@null, 0, rest::binary>>) do
-    {:ok, {:null, rest}}
+  defp parse_value_with_type(<<@null, 0, rest::binary>>) do
+    {:ok, {:null, :null, rest}}
   end
-  defp parse_value(<<@object_identifier, length, oid_data::binary-size(length), rest::binary>>) do
+  defp parse_value_with_type(<<@object_identifier, length, oid_data::binary-size(length), rest::binary>>) do
     case decode_oid_data(oid_data) do
       {:ok, oid_list} -> 
-        # Convert list back to string format for consistency
-        oid_string = Enum.join(oid_list, ".")
-        {:ok, {{:object_identifier, oid_string}, rest}}
-      {:error, _} -> {:ok, {{:unknown, oid_data}, rest}}
+        {:ok, {:object_identifier, oid_list, rest}}
+      {:error, _} -> 
+        {:error, :invalid_oid}
     end
   end
-  defp parse_value(<<tag, length, value::binary-size(length), rest::binary>>) do
-    decoded_value = case tag do
-      @counter32 -> {:counter32, decode_unsigned_integer(value)}
-      @gauge32 -> {:gauge32, decode_unsigned_integer(value)}
-      @timeticks -> {:timeticks, decode_unsigned_integer(value)}
-      @counter64 -> {:counter64, decode_counter64(value)}
-      @ip_address -> {:ip_address, value}
-      @opaque_type -> {:opaque, value}
-      @no_such_object -> {:no_such_object, nil}
-      @no_such_instance -> {:no_such_instance, nil}
-      @end_of_mib_view -> {:end_of_mib_view, nil}
-      _ -> {:unknown, value}
-    end
-    {:ok, {decoded_value, rest}}
+  defp parse_value_with_type(<<@counter32, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:counter32, decode_unsigned_integer(value), rest}}
   end
-  defp parse_value(_), do: {:error, :invalid_value}
+  defp parse_value_with_type(<<@gauge32, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:gauge32, decode_unsigned_integer(value), rest}}
+  end
+  defp parse_value_with_type(<<@timeticks, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:timeticks, decode_unsigned_integer(value), rest}}
+  end
+  defp parse_value_with_type(<<@counter64, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:counter64, decode_counter64(value), rest}}
+  end
+  defp parse_value_with_type(<<@ip_address, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:ip_address, value, rest}}
+  end
+  defp parse_value_with_type(<<@opaque_type, length, value::binary-size(length), rest::binary>>) do
+    {:ok, {:opaque, value, rest}}
+  end
+  defp parse_value_with_type(<<@no_such_object, 0, rest::binary>>) do
+    {:ok, {:no_such_object, nil, rest}}
+  end
+  defp parse_value_with_type(<<@no_such_instance, 0, rest::binary>>) do
+    {:ok, {:no_such_instance, nil, rest}}
+  end
+  defp parse_value_with_type(<<@end_of_mib_view, 0, rest::binary>>) do
+    {:ok, {:end_of_mib_view, nil, rest}}
+  end
+  defp parse_value_with_type(_), do: {:error, :invalid_value}
 
   defp decode_integer_value(<<byte>>) when byte < 128, do: byte
   defp decode_integer_value(<<byte>>) when byte >= 128, do: byte - 256
