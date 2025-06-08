@@ -758,22 +758,16 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:object_identifier, value) when is_list(value) do
     case encode_oid_fast(value) do
       {:ok, encoded} -> encoded
-      {:error, _} -> <<@null, 0x00>>
+      {:error, _} -> raise ArgumentError, "Invalid OID list: #{inspect(value)}"
     end
   end
   defp encode_snmp_value_fast(:object_identifier, value) when is_binary(value) do
-    try do
-      case String.split(value, ".") |> Enum.map(&String.to_integer/1) do
-        oid_list when is_list(oid_list) ->
-          case encode_oid_fast(oid_list) do
-            {:ok, encoded} -> encoded
-            {:error, _} -> <<@null, 0x00>>
-          end
-        _ -> <<@null, 0x00>>
-      end
-    rescue
-      _ -> <<@null, 0x00>>
-    end
+    raise ArgumentError, """
+    Invalid value for :object_identifier type. Expected a list of integers (OID), got string: #{inspect(value)}
+    
+    String OID values are not supported. Please convert to an OID list first.
+    Example: "1.3.6.1.2.1.1.1.0" should be [1, 3, 6, 1, 2, 1, 1, 1, 0]
+    """
   end
   defp encode_snmp_value_fast(:auto, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:auto, value) when is_binary(value), do: encode_octet_string_fast(value)
@@ -782,10 +776,10 @@ defmodule SnmpLib.PDU do
     if Enum.all?(value, &(is_integer(&1) and &1 >= 0)) do
       case encode_oid_fast(value) do
         {:ok, encoded} -> encoded
-        {:error, _} -> <<@null, 0x00>>
+        {:error, _} -> raise ArgumentError, "Invalid OID list: #{inspect(value)}"
       end
     else
-      <<@null, 0x00>>
+      raise ArgumentError, "Invalid value for :auto type: #{inspect(value)}"
     end
   end
   defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
@@ -810,18 +804,38 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_list(value) do
     case encode_oid_fast(value) do
       {:ok, encoded} -> encoded
-      {:error, _} -> <<@null, 0x00>>
+      {:error, _} -> raise ArgumentError, "Invalid OID list: #{inspect(value)}"
     end
   end
   defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_binary(value) do
-    encode_snmp_value_fast(:object_identifier, value)
+    raise ArgumentError, """
+    Invalid value for :object_identifier type. Expected a list of integers (OID), got string: #{inspect(value)}
+    
+    String OID values are not supported. Please convert to an OID list first.
+    Example: "1.3.6.1.2.1.1.1.0" should be [1, 3, 6, 1, 2, 1, 1, 1, 0]
+    """
+  end
+  defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}) do
+    raise ArgumentError, """
+    Invalid value for :end_of_mib_view type. Expected nil, got tuple: {:end_of_mib_view, _}
+    
+    For :end_of_mib_view type, use nil as the value.
+    Example: {oid, :end_of_mib_view, nil}
+    """
   end
   defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
+  defp encode_snmp_value_fast(:end_of_mib_view, nil), do: <<@end_of_mib_view, 0x00>>
+  defp encode_snmp_value_fast(:end_of_mib_view, value) do
+    raise ArgumentError, """
+    Invalid value for :end_of_mib_view type. Expected nil, got: #{inspect(value)}
+    
+    For :end_of_mib_view type, the value must be nil.
+    Example: {oid, :end_of_mib_view, nil}
+    """
+  end
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
-  defp encode_snmp_value_fast(:end_of_mib_view, _), do: <<@end_of_mib_view, 0x00>>
   defp encode_snmp_value_fast(_, _), do: <<@null, 0x00>>
 
   # ASN.1 BER encoding helpers

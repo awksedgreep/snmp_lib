@@ -32,104 +32,99 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
     end
     
     test "rejects invalid first subidentifier values" do
-      # First subidentifier must be 0, 1, or 2
+      # According to X.690, first subidentifier must be 0, 1, or 2
       invalid_first = [
         [3, 0],
-        [4, 5],
-        [10, 1],
-        [255, 0]
+        [4, 1],
+        [255, 0],
+        [-1, 0]
       ]
       
       Enum.each(invalid_first, fn invalid_oid ->
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, invalid_oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, invalid_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
-        {:ok, encoded} = PDU.encode_message(message)
-        {:ok, decoded} = PDU.decode_message(encoded)
-        
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        
-        # Should fall back to :null for invalid first subidentifier
-        assert decoded_value == :null, 
-          "Invalid first subidentifier #{inspect(invalid_oid)} should become :null, got #{inspect(decoded_value)}"
+        case PDU.encode_message(message) do
+          {:error, {:encoding_error, %ArgumentError{}}} ->
+            # Expected behavior - validation should reject invalid OIDs
+            :ok
+          {:ok, _encoded} ->
+            flunk("Expected ArgumentError for invalid OID #{inspect(invalid_oid)}, but encoding succeeded")
+          {:error, other} ->
+            flunk("Expected ArgumentError for invalid OID #{inspect(invalid_oid)}, but got: #{inspect(other)}")
+        end
       end)
     end
     
     test "rejects invalid second subidentifier values for first=0 or first=1" do
-      # When first subidentifier is 0 or 1, second must be <= 39
+      # When first subidentifier is 0 or 1, second must be 0-39
       invalid_second = [
         [0, 40],
         [0, 50],
         [1, 40],
-        [1, 100]
+        [1, 100],
+        [0, -1],
+        [1, -5]
       ]
       
       Enum.each(invalid_second, fn invalid_oid ->
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, invalid_oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, invalid_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
-        {:ok, encoded} = PDU.encode_message(message)
-        {:ok, decoded} = PDU.decode_message(encoded)
-        
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        
-        # Should fall back to :null for invalid second subidentifier
-        assert decoded_value == :null, 
-          "Invalid second subidentifier #{inspect(invalid_oid)} should become :null, got #{inspect(decoded_value)}"
+        case PDU.encode_message(message) do
+          {:error, {:encoding_error, %ArgumentError{}}} ->
+            # Expected behavior - validation should reject invalid OIDs
+            :ok
+          {:ok, _encoded} ->
+            flunk("Expected ArgumentError for invalid OID #{inspect(invalid_oid)}, but encoding succeeded")
+          {:error, other} ->
+            flunk("Expected ArgumentError for invalid OID #{inspect(invalid_oid)}, but got: #{inspect(other)}")
+        end
       end)
     end
     
     test "handles string OID parsing edge cases" do
-      # Test various malformed string OID formats
+      # Test malformed string OIDs that should raise ArgumentError
       malformed_strings = [
         {"", "empty string"},
-        {"1", "single component"},
-        {"1.3.6.1.2.1.1.1.0.", "trailing dot"},
-        {".1.3.6.1.2.1.1.1.0", "leading dot"},
-        {"1..3.6", "double dot"},
-        {"1.3.6.x.1", "non-numeric component"},
-        {"1.3.6.1.2.1.1.1.0.extra", "non-numeric at end"},
-        {"1.3.6.-1", "negative component"},
-        {"1,3,6,1", "comma instead of dot"},
-        {"1 3 6 1", "spaces instead of dots"}
+        {"1", "single number"},
+        {"1.", "trailing dot"},
+        {".1.2.3", "leading dot"},
+        {"1..2.3", "double dots"},
+        {"1.2.a.3", "non-numeric component"},
+        {"1.2.-1.3", "negative number"},
+        {"not.an.oid", "completely invalid"},
+        {"1.2.3.", "trailing dot after numbers"}
       ]
       
       Enum.each(malformed_strings, fn {malformed_string, description} ->
-        test_value = {:object_identifier, malformed_string}
-        
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, malformed_string}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
-        {:ok, encoded} = PDU.encode_message(message)
-        {:ok, decoded} = PDU.decode_message(encoded)
-        
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        
-        assert decoded_value == :null, 
-          "Malformed string OID #{description} should become :null, got #{inspect(decoded_value)}"
+        case PDU.encode_message(message) do
+          {:error, {:encoding_error, %ArgumentError{}}} ->
+            # Expected behavior - validation should reject malformed string OIDs
+            :ok
+          {:ok, _encoded} ->
+            flunk("Expected ArgumentError for #{description}, but encoding succeeded")
+          {:error, other} ->
+            flunk("Expected ArgumentError for #{description}, but got: #{inspect(other)}")
+        end
       end)
     end
     
     test "handles explicit :object_identifier type with various inputs" do
       # Test explicit type with different input formats
-      explicit_tests = [
+      valid_tests = [
         # Valid inputs
-        {[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid list"},
-        {"1.3.6.1.2.1.1.1.0", [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid string"},
-        
-        # Invalid inputs that should become :null
-        {[], :null, "empty list"},
-        {[1], :null, "single element list"},
-        {"", :null, "empty string"},
-        {"invalid", :null, "invalid string"},
-        {123, :null, "integer instead of list/string"},
-        {:not_an_oid, :null, "atom instead of list/string"}
+        {[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid list"}
       ]
       
-      Enum.each(explicit_tests, fn {input, expected, description} ->
+      # Test valid inputs
+      Enum.each(valid_tests, fn {input, expected, description} ->
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, input}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
@@ -141,6 +136,33 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         
         assert decoded_value == expected, 
           "Explicit type #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+      end)
+      
+      # Test invalid inputs that should raise ArgumentError
+      invalid_tests = [
+        {"1.3.6.1.2.1.1.1.0", "string OID"},
+        {[], "empty list"},
+        {[1], "single element list"},
+        {"", "empty string"},
+        {"invalid", "invalid string"},
+        {123, "integer instead of list/string"},
+        {:not_an_oid, "atom instead of list/string"}
+      ]
+      
+      Enum.each(invalid_tests, fn {input, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, input}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        case PDU.encode_message(message) do
+          {:error, {:encoding_error, %ArgumentError{}}} ->
+            # Expected behavior - validation should reject invalid inputs
+            :ok
+          {:ok, _encoded} ->
+            flunk("Expected ArgumentError for #{description}, but encoding succeeded")
+          {:error, other} ->
+            flunk("Expected ArgumentError for #{description}, but got: #{inspect(other)}")
+        end
       end)
     end
     

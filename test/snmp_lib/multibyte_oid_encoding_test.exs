@@ -19,7 +19,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         # Test with list OID containing the value
         test_oid = [1, 3, 6, 1, 4, 1, value]
         
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, test_oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, test_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -49,11 +49,8 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         # Test full enterprise OID
         full_oid = [1, 3, 6, 1, 4, 1, enterprise, 1, 1, 1, 0]
         
-        # Test with string format
-        oid_string = Enum.join(full_oid, ".")
-        test_value = {:object_identifier, oid_string}
-        
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        # Test with list format (string format is no longer supported)
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, full_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -66,7 +63,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
           "Enterprise #{description} (#{enterprise}) failed: expected #{inspect(full_oid)}, got #{inspect(decoded_value)}"
         
         # Also test with list format for the same enterprise number
-        varbinds_list = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, full_oid}]
+        varbinds_list = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, full_oid}]
         pdu_list = PDU.build_response(2, 0, 0, varbinds_list)
         message_list = PDU.build_message(pdu_list, "public", :v2c)
         
@@ -91,7 +88,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
       Enum.each(multibyte_tests, fn {value, expected_bytes, description} ->
         test_oid = [1, 3, 6, 1, 4, 1, value]
         
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, test_oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, test_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -120,7 +117,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
       Enum.each(large_values, fn value ->
         test_oid = [1, 3, 6, 1, 4, 1, value]
         
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, test_oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, test_oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -142,7 +139,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         original_oid = [1, 3, 6, 1, 4, 1, value, 1, 1, 0]
         
         # First cycle
-        varbinds1 = [{[1, 3, 6, 1], :auto, {:object_identifier, original_oid}}]
+        varbinds1 = [{[1, 3, 6, 1], :object_identifier, original_oid}]
         pdu1 = PDU.build_response(1, 0, 0, varbinds1)
         message1 = PDU.build_message(pdu1, "public", :v2c)
         
@@ -151,7 +148,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {_, _, result1} = hd(decoded1.pdu.varbinds)
         
         # Second cycle using result from first
-        varbinds2 = [{[1, 3, 6, 1], :auto, result1}]
+        varbinds2 = [{[1, 3, 6, 1], :object_identifier, result1}]
         pdu2 = PDU.build_response(2, 0, 0, varbinds2)
         message2 = PDU.build_message(pdu2, "public", :v2c)
         
@@ -160,7 +157,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
         {_, _, result2} = hd(decoded2.pdu.varbinds)
         
         # Third cycle
-        varbinds3 = [{[1, 3, 6, 1], :auto, result2}]
+        varbinds3 = [{[1, 3, 6, 1], :object_identifier, result2}]
         pdu3 = PDU.build_response(3, 0, 0, varbinds3)
         message3 = PDU.build_message(pdu3, "public", :v2c)
         
@@ -185,7 +182,7 @@ defmodule SnmpLib.MultibyteOidEncodingTest do
       ]
       
       Enum.each(mixed_oids, fn oid ->
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, {:object_identifier, oid}}]
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, oid}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         

@@ -55,7 +55,7 @@ defmodule SnmpLib.ExceptionValuesTest do
       ]
       
       Enum.each(test_oids, fn oid ->
-        varbinds = [{oid, :auto, {:end_of_mib_view, nil}}]
+        varbinds = [{oid, :end_of_mib_view, nil}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -71,11 +71,11 @@ defmodule SnmpLib.ExceptionValuesTest do
     test "handles mixed exception values in single response" do
       # Test multiple different exception values in one PDU
       mixed_varbinds = [
-        {[1, 3, 6, 1, 2, 1, 1, 8, 0], :auto, {:no_such_object, nil}},
-        {[1, 3, 6, 1, 2, 1, 2, 2, 1, 1, 999], :auto, {:no_such_instance, nil}},
-        {[1, 3, 6, 1, 4, 1, 99999, 1, 1], :auto, {:end_of_mib_view, nil}},
-        {[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, "Normal value"},  # Mix with normal value
-        {[1, 3, 6, 1, 2, 1, 1, 3, 0], :auto, {:timeticks, 12345}} # Mix with other type
+        {[1, 3, 6, 1, 2, 1, 1, 8, 0], :no_such_object, nil},
+        {[1, 3, 6, 1, 2, 1, 2, 2, 1, 1, 999], :no_such_instance, nil},
+        {[1, 3, 6, 1, 4, 1, 99999, 1, 1], :end_of_mib_view, nil},
+        {[1, 3, 6, 1, 2, 1, 1, 1, 0], :octet_string, "Normal value"},  # Mix with normal value
+        {[1, 3, 6, 1, 2, 1, 1, 3, 0], :timeticks, 12345} # Mix with other type
       ]
       
       pdu = PDU.build_response(1, 0, 0, mixed_varbinds)
@@ -158,14 +158,14 @@ defmodule SnmpLib.ExceptionValuesTest do
     test "preserves exception value semantics across encode/decode cycles" do
       # Test that exception values maintain their exact semantics
       exception_scenarios = [
-        {[1, 3, 6, 1, 2, 1, 1, 99, 0], {:no_such_object, nil}, "Object does not exist"},
-        {[1, 3, 6, 1, 2, 1, 2, 2, 1, 1, 99], {:no_such_instance, nil}, "Instance does not exist"},
-        {[1, 3, 6, 1, 2, 1, 99, 99, 99], {:end_of_mib_view, nil}, "End of MIB tree"}
+        {[1, 3, 6, 1, 2, 1, 1, 99, 0], :no_such_object, nil, "Object does not exist"},
+        {[1, 3, 6, 1, 2, 1, 2, 2, 1, 1, 99], :no_such_instance, nil, "Instance does not exist"},
+        {[1, 3, 6, 1, 2, 1, 99, 99, 99], :end_of_mib_view, nil, "End of MIB tree"}
       ]
       
-      Enum.each(exception_scenarios, fn {oid, exception, description} ->
+      Enum.each(exception_scenarios, fn {oid, type, value, description} ->
         # Test multiple encode/decode cycles
-        varbinds = [{oid, :auto, exception}]
+        varbinds = [{oid, type, value}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
@@ -192,13 +192,10 @@ defmodule SnmpLib.ExceptionValuesTest do
         {:ok, decoded3} = PDU.decode_message(encoded3)
         {_, type3, value3} = hd(decoded3.pdu.varbinds)
         
-        # Get expected type from exception tuple
-        {expected_type, _} = exception
-        
         # All types and values should be consistent
-        assert type1 == expected_type, "First cycle type failed for #{description}"
-        assert type2 == expected_type, "Second cycle type failed for #{description}"
-        assert type3 == expected_type, "Third cycle type failed for #{description}"
+        assert type1 == type, "First cycle type failed for #{description}"
+        assert type2 == type, "Second cycle type failed for #{description}"
+        assert type3 == type, "Third cycle type failed for #{description}"
         assert value1 == nil, "First cycle value failed for #{description}"
         assert value2 == nil, "Second cycle value failed for #{description}"
         assert value3 == nil, "Third cycle value failed for #{description}"

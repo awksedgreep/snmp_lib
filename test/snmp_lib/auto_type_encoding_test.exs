@@ -4,23 +4,19 @@ defmodule SnmpLib.AutoTypeEncodingTest do
   alias SnmpLib.PDU
   
   describe "Auto type encoding for complex SNMP data types" do
-    test "encodes and decodes all supported tuple formats with :auto type" do
-      # Test all the tuple formats we added support for
-      tuple_tests = [
+    test "encodes and decodes valid tuple formats with :auto type" do
+      # Test valid tuple formats that should work
+      valid_tuple_tests = [
         {{:counter32, 12345}, "counter32 tuple"},
         {{:gauge32, 98765}, "gauge32 tuple"},
         {{:timeticks, 123456789}, "timeticks tuple"},
         {{:counter64, 9876543210}, "counter64 tuple"},
         {{:ip_address, <<192, 168, 1, 1>>}, "ip_address tuple"},
         {{:opaque, <<1, 2, 3, 4, 5>>}, "opaque tuple"},
-        {{:object_identifier, [1, 3, 6, 1, 2, 1, 1, 1, 0]}, "object_identifier tuple with list"},
-        {{:object_identifier, "1.3.6.1.2.1.1.1.0"}, "object_identifier tuple with string"},
-        {{:no_such_object, nil}, "no_such_object exception"},
-        {{:no_such_instance, nil}, "no_such_instance exception"},
-        {{:end_of_mib_view, nil}, "end_of_mib_view exception"}
+        {{:object_identifier, [1, 3, 6, 1, 2, 1, 1, 1, 0]}, "object_identifier tuple with list"}
       ]
       
-      Enum.each(tuple_tests, fn {test_value, description} ->
+      Enum.each(valid_tuple_tests, fn {test_value, description} ->
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
@@ -41,13 +37,6 @@ defmodule SnmpLib.AutoTypeEncodingTest do
           {:object_identifier, oid_list} when is_list(oid_list) ->
             # OIDs are decoded as lists
             {:object_identifier, oid_list}
-          {:object_identifier, oid_string} when is_binary(oid_string) ->
-            # String OIDs are converted to lists during encoding
-            oid_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
-            {:object_identifier, oid_list}
-          {:no_such_object, _} -> {:no_such_object, nil}
-          {:no_such_instance, _} -> {:no_such_instance, nil}
-          {:end_of_mib_view, _} -> {:end_of_mib_view, nil}
         end
         
         assert decoded_type == expected_type, 
@@ -57,9 +46,9 @@ defmodule SnmpLib.AutoTypeEncodingTest do
       end)
     end
     
-    test "handles invalid tuple values gracefully" do
-      # Test that invalid tuple values fall back to :null
-      invalid_tests = [
+    test "raises ArgumentError for invalid tuple formats with :auto type" do
+      # Test invalid tuple formats that should raise ArgumentError
+      invalid_tuple_tests = [
         {{:counter32, -1}, "negative counter32"},
         {{:counter32, "not_a_number"}, "non-numeric counter32"},
         {{:gauge32, -100}, "negative gauge32"},
@@ -74,23 +63,45 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {{:unknown_type, "value"}, "unknown tuple type"}
       ]
       
-      Enum.each(invalid_tests, fn {test_value, description} ->
+      Enum.each(invalid_tuple_tests, fn {test_value, description} ->
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
-        {:ok, encoded} = PDU.encode_message(message)
-        {:ok, decoded} = PDU.decode_message(encoded)
+        assert_raise ArgumentError, fn ->
+          PDU.encode_message(message)
+        end
+      end)
+    end
+    
+    test "raises ArgumentError for string OIDs and exception tuples with :auto type" do
+      # Test cases that should raise ArgumentError due to new validation
+      validation_error_tests = [
+        {{:object_identifier, "1.3.6.1.2.1.1.1.0"}, "object_identifier tuple with string"},
+        {{:no_such_object, nil}, "no_such_object exception tuple"},
+        {{:no_such_instance, nil}, "no_such_instance exception tuple"},
+        {{:end_of_mib_view, nil}, "end_of_mib_view exception tuple"}
+      ]
+      
+      Enum.each(validation_error_tests, fn {test_value, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
         
-        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
-        
-        assert decoded_type == :null && decoded_value == :null, 
-          "Invalid #{description} should fall back to :null type and value, got type=#{inspect(decoded_type)}, value=#{inspect(decoded_value)}"
+        case PDU.encode_message(message) do
+          {:error, {:encoding_error, %ArgumentError{}}} ->
+            # Expected behavior - validation should reject these inputs
+            :ok
+          {:ok, _encoded} ->
+            flunk("Expected ArgumentError for #{description}, but encoding succeeded")
+          {:error, other} ->
+            flunk("Expected ArgumentError for #{description}, but got: #{inspect(other)}")
+        end
       end)
     end
     
     test "preserves data integrity across encode/decode cycles for all types" do
-      # Test round-trip integrity for all supported complex types
+      # Test round-trip integrity for valid complex types (no exception tuples)
       test_data = [
         {:counter32, 2147483647},
         {:gauge32, 1000000},
@@ -98,10 +109,7 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:counter64, 9223372036854775807},
         {:ip_address, <<10, 0, 0, 1>>},
         {:opaque, :crypto.strong_rand_bytes(32)},
-        {:object_identifier, [1, 3, 6, 1, 4, 1, 2021, 1, 1, 1, 0]},
-        {:no_such_object, nil},
-        {:no_such_instance, nil},
-        {:end_of_mib_view, nil}
+        {:object_identifier, [1, 3, 6, 1, 4, 1, 2021, 1, 1, 1, 0]}
       ]
       
       Enum.each(test_data, fn test_value ->
