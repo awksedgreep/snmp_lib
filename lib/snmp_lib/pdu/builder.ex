@@ -35,6 +35,26 @@ defmodule SnmpLib.PDU.Builder do
   end
 
   @doc """
+  Builds a GET request PDU with multiple varbinds.
+  """
+  @spec build_get_request_multi([varbind()], pos_integer()) :: pdu()
+  def build_get_request_multi(varbinds, request_id) do
+    validate_request_id!(request_id)
+    
+    case validate_varbinds_format(varbinds) do
+      :ok ->
+        %{
+          type: :get_request,
+          request_id: request_id,
+          error_status: Constants.no_error(),
+          error_index: 0,
+          varbinds: varbinds
+        }
+      error -> error
+    end
+  end
+
+  @doc """
   Builds a GETNEXT request PDU.
   """
   @spec build_get_next_request(oid(), pos_integer()) :: pdu()
@@ -91,33 +111,6 @@ defmodule SnmpLib.PDU.Builder do
       max_repetitions: max_repetitions,
       varbinds: [{normalized_oid, :null, :null}]
     }
-  end
-
-  @doc """
-  Builds a GET request PDU with multiple OID/value pairs.
-  """
-  @spec build_get_request_multi([varbind()], pos_integer()) :: {:ok, pdu()} | {:error, atom()}
-  def build_get_request_multi(varbinds, request_id) when is_list(varbinds) and length(varbinds) > 0 do
-    validate_request_id!(request_id)
-    
-    case validate_varbinds_format(varbinds) do
-      :ok ->
-        {:ok, %{
-          type: :get_request,
-          request_id: request_id,
-          error_status: Constants.no_error(),
-          error_index: 0,
-          varbinds: varbinds
-        }}
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
-  def build_get_request_multi([], _request_id) do
-    {:error, :empty_varbinds}
-  end
-  def build_get_request_multi(_varbinds, _request_id) do
-    {:error, :invalid_varbinds_format}
   end
 
   @doc """
@@ -228,6 +221,19 @@ defmodule SnmpLib.PDU.Builder do
     end
   end
   def validate(_), do: {:error, :invalid_pdu_format}
+
+  @doc """
+  Validates a community string against an encoded SNMP message.
+  """
+  @spec validate_community(binary(), binary()) :: :ok | {:error, atom()}
+  def validate_community(encoded_message, expected_community) when is_binary(encoded_message) and is_binary(expected_community) do
+    case SnmpLib.PDU.Decoder.decode_message(encoded_message) do
+      {:ok, %{community: community}} when community == expected_community -> :ok
+      {:ok, %{community: _other}} -> {:error, :invalid_community}
+      {:error, _reason} -> {:error, :decode_failed}
+    end
+  end
+  def validate_community(_encoded, _community), do: {:error, :invalid_parameters}
 
   ## Private Implementation
 

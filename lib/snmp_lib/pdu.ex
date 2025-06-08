@@ -76,7 +76,7 @@ defmodule SnmpLib.PDU do
   
   ```elixir
   # Complete SNMP message
-  {:ok, message} = SnmpLib.PDU.build_message(1, "public", pdu)
+  {:ok, message} = SnmpLib.PDU.build_message(pdu, "public", :v2c)
   
   # Encode to binary
   {:ok, packet} = SnmpLib.PDU.encode_message(message)
@@ -172,6 +172,29 @@ defmodule SnmpLib.PDU do
   def build_get_request(oid_or_oids, request_id), do: Builder.build_get_request(oid_or_oids, request_id)
 
   @doc """
+  Builds a GET request PDU with multiple varbinds.
+  
+  ## Parameters
+  
+  - `varbinds`: List of variable bindings in format `{oid, type, value}`
+  - `request_id`: Unique request identifier
+  
+  ## Examples
+  
+      iex> varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :null, :null}]
+      iex> {:ok, pdu} = SnmpLib.PDU.build_get_request_multi(varbinds, 123)
+      iex> pdu.type
+      :get_request
+  """
+  @spec build_get_request_multi([varbind()], non_neg_integer()) :: {:ok, pdu()} | {:error, atom()}
+  def build_get_request_multi(varbinds, request_id) do
+    case Builder.build_get_request_multi(varbinds, request_id) do
+      %{} = pdu -> {:ok, pdu}
+      error -> error
+    end
+  end
+
+  @doc """
   Builds a GETNEXT request PDU.
   
   ## Parameters
@@ -251,23 +274,38 @@ defmodule SnmpLib.PDU do
   end
 
   @doc """
-  Builds a complete SNMP message.
+  Builds an SNMP message with version, community, and PDU.
   
   ## Parameters
   
-  - `version`: SNMP version (0 for SNMPv1, 1 for SNMPv2c)
-  - `community`: Community string
-  - `pdu`: PDU map
+  - `pdu`: PDU structure to include in the message
+  - `community`: Community string for authentication
+  - `version`: SNMP version
   
   ## Examples
   
-      iex> pdu = %{type: :get_request, request_id: 123, error_status: 0, error_index: 0, varbinds: []}
-      iex> {:ok, message} = SnmpLib.PDU.build_message(1, "public", pdu)
+      iex> {:ok, pdu} = SnmpLib.PDU.build_get_request([1, 3, 6, 1, 2, 1, 1, 1, 0], 123)
+      iex> message = SnmpLib.PDU.build_message(pdu, "public", :v2c)
       iex> message.version
       1
   """
-  @spec build_message(non_neg_integer(), binary(), pdu()) :: {:ok, message()} | {:error, atom()}
-  def build_message(version, community, pdu), do: Builder.build_message(version, community, pdu)
+  @spec build_message(pdu(), binary(), Constants.snmp_version()) :: message()
+  def build_message(pdu, community, version \\ :v1), do: Builder.build_message(pdu, community, version)
+
+  @doc """
+  Validates a community string.
+  
+  ## Parameters
+  
+  - `encoded_message`: Encoded SNMP message
+  - `expected_community`: Expected community string
+  
+  ## Examples
+  
+      iex> :ok = SnmpLib.PDU.validate_community(encoded_msg, "public")
+  """
+  @spec validate_community(binary(), binary()) :: :ok | {:error, atom()}
+  def validate_community(encoded_message, expected_community), do: Builder.validate_community(encoded_message, expected_community)
 
   @doc """
   Creates an error response PDU.
@@ -288,6 +326,26 @@ defmodule SnmpLib.PDU do
   @spec create_error_response(pdu(), error_status() | atom(), non_neg_integer()) :: pdu()
   def create_error_response(request_pdu, error_status, error_index) do
     Builder.create_error_response(request_pdu, error_status, error_index)
+  end
+
+  @doc """
+  Creates an error response PDU.
+  
+  ## Parameters
+  
+  - `request_pdu`: Original request PDU
+  - `error_status`: Error status atom or code
+  
+  ## Examples
+  
+      iex> request_pdu = %{type: :get_request, request_id: 123, error_status: 0, error_index: 0, varbinds: []}
+      iex> error_pdu = SnmpLib.PDU.create_error_response(request_pdu, :no_such_name)
+      iex> error_pdu.error_status
+      2
+  """
+  @spec create_error_response(pdu(), error_status() | atom()) :: pdu()
+  def create_error_response(request_pdu, error_status) do
+    Builder.create_error_response(request_pdu, error_status, 0)
   end
 
   ## Public API - Validation
