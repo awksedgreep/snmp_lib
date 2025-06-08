@@ -28,19 +28,32 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
-        # For object_identifier lists, the expected result is converted to string format
-        expected = case test_value do
+        # With the standardized 3-tuple format, the type and value are separate
+        {expected_type, expected_value} = case test_value do
+          {:counter32, val} -> {:counter32, val}
+          {:gauge32, val} -> {:gauge32, val}
+          {:timeticks, val} -> {:timeticks, val}
+          {:counter64, val} -> {:counter64, val}
+          {:ip_address, val} -> {:ip_address, val}
+          {:opaque, val} -> {:opaque, val}
           {:object_identifier, oid_list} when is_list(oid_list) ->
-            oid_string = Enum.join(oid_list, ".")
-            {:object_identifier, oid_string}
-          _ ->
-            test_value
+            # OIDs are decoded as lists
+            {:object_identifier, oid_list}
+          {:object_identifier, oid_string} when is_binary(oid_string) ->
+            # String OIDs are converted to lists during encoding
+            oid_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
+            {:object_identifier, oid_list}
+          {:no_such_object, _} -> {:no_such_object, nil}
+          {:no_such_instance, _} -> {:no_such_instance, nil}
+          {:end_of_mib_view, _} -> {:end_of_mib_view, nil}
         end
         
-        assert decoded_value == expected, 
-          "Auto type encoding failed for #{description}: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_type == expected_type, 
+          "Auto type encoding failed for #{description}: expected type #{inspect(expected_type)}, got #{inspect(decoded_type)}"
+        assert decoded_value == expected_value,
+          "Auto type encoding failed for #{description}: expected value #{inspect(expected_value)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -69,10 +82,10 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
-        assert decoded_value == :null, 
-          "Invalid #{description} should fall back to :null, got #{inspect(decoded_value)}"
+        assert decoded_type == :null && decoded_value == :null, 
+          "Invalid #{description} should fall back to :null type and value, got type=#{inspect(decoded_type)}, value=#{inspect(decoded_value)}"
       end)
     end
     
@@ -102,39 +115,38 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         
         {:ok, encoded1} = PDU.encode_message(message1)
         {:ok, decoded1} = PDU.decode_message(encoded1)
-        {_, _, result1} = hd(decoded1.pdu.varbinds)
+        {_, type1, value1} = hd(decoded1.pdu.varbinds)
         
-        # Cycle 2
-        varbinds2 = [{[1, 3, 6, 1], :auto, result1}]
+        # Cycle 2 - use the decoded type and value
+        varbinds2 = [{[1, 3, 6, 1], type1, value1}]
         pdu2 = PDU.build_response(2, 0, 0, varbinds2)
         message2 = PDU.build_message(pdu2, "public", :v2c)
         
         {:ok, encoded2} = PDU.encode_message(message2)
         {:ok, decoded2} = PDU.decode_message(encoded2)
-        {_, _, result2} = hd(decoded2.pdu.varbinds)
+        {_, type2, value2} = hd(decoded2.pdu.varbinds)
         
-        # Cycle 3
-        varbinds3 = [{[1, 3, 6, 1], :auto, result2}]
+        # Cycle 3 - use the decoded type and value
+        varbinds3 = [{[1, 3, 6, 1], type2, value2}]
         pdu3 = PDU.build_response(3, 0, 0, varbinds3)
         message3 = PDU.build_message(pdu3, "public", :v2c)
         
         {:ok, encoded3} = PDU.encode_message(message3)
         {:ok, decoded3} = PDU.decode_message(encoded3)
-        {_, _, result3} = hd(decoded3.pdu.varbinds)
+        {_, type3, value3} = hd(decoded3.pdu.varbinds)
         
-        # For object_identifier, convert to expected string format
-        expected_original = case original do
-          {:object_identifier, oid_list} when is_list(oid_list) ->
-            {:object_identifier, Enum.join(oid_list, ".")}
-          _ ->
-            original
-        end
+        # Extract expected type and value from original tuple
+        {expected_type, expected_value} = original
         
-        assert result1 == expected_original, "First cycle failed for #{inspect(original)}"
-        assert result2 == expected_original, "Second cycle failed for #{inspect(original)}"
-        assert result3 == expected_original, "Third cycle failed for #{inspect(original)}"
-        assert result1 == result2, "Results differ between cycle 1 and 2 for #{inspect(original)}"
-        assert result2 == result3, "Results differ between cycle 2 and 3 for #{inspect(original)}"
+        # For object_identifier, lists are preserved
+        # No need to convert to string format anymore
+        
+        assert type1 == expected_type, "First cycle type failed for #{inspect(original)}"
+        assert value1 == expected_value, "First cycle value failed for #{inspect(original)}"
+        assert type2 == expected_type, "Second cycle type failed for #{inspect(original)}"
+        assert value2 == expected_value, "Second cycle value failed for #{inspect(original)}"
+        assert type3 == expected_type, "Third cycle type failed for #{inspect(original)}"
+        assert value3 == expected_value, "Third cycle value failed for #{inspect(original)}"
       end)
     end
     
@@ -165,16 +177,18 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:counter32, 987654},
         {:gauge32, 100000000},
         {:ip_address, <<192, 168, 1, 100>>},
-        {:object_identifier, "1.3.6.1.4.1.8072.3.2.10"},
+        {:object_identifier, [1, 3, 6, 1, 4, 1, 8072, 3, 2, 10]},
         {:opaque, <<0xDE, 0xAD, 0xBE, 0xEF>>},
         {:no_such_object, nil}
       ]
       
       Enum.zip(decoded_varbinds, expected_values)
       |> Enum.with_index()
-      |> Enum.each(fn {{{_oid, _type, decoded_value}, expected}, index} ->
-        assert decoded_value == expected, 
-          "Mixed PDU varbind #{index + 1} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+      |> Enum.each(fn {{{_oid, decoded_type, decoded_value}, {expected_type, expected_value}}, index} ->
+        assert decoded_type == expected_type, 
+          "Mixed PDU varbind #{index + 1} type failed: expected #{inspect(expected_type)}, got #{inspect(decoded_type)}"
+        assert decoded_value == expected_value, 
+          "Mixed PDU varbind #{index + 1} value failed: expected #{inspect(expected_value)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -201,10 +215,12 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
-        assert decoded_value == test_tuple, 
-          "Boundary test #{description} failed: expected #{inspect(test_tuple)}, got #{inspect(decoded_value)}"
+        assert decoded_type == type, 
+          "Boundary test #{description} failed: expected type #{inspect(type)}, got #{inspect(decoded_type)}"
+        assert decoded_value == value,
+          "Boundary test #{description} failed: expected value #{inspect(value)}, got #{inspect(decoded_value)}"
       end)
     end
   end

@@ -23,8 +23,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:counter32, value}, "Counter32 #{value} failed round-trip"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :counter32, "Counter32 #{value} failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "Counter32 #{value} failed round-trip"
       end)
     end
     
@@ -45,15 +46,16 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:counter32, value}, "Counter32 #{description} (#{value}) failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :counter32, "Counter32 #{description} (#{value}) failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "Counter32 #{description} (#{value}) failed"
       end)
     end
     
     test "handles invalid counter32 values" do
       invalid_values = [
         {-1, :null},  # Negative values become :null
-        {4294967296, {:counter32, 0}},  # Values exceeding 32-bit become counter32 with value 0
+        {4294967296, :null},  # Values exceeding 32-bit become :null
         {"not_a_number", :null}  # Non-numeric values become :null
       ]
       
@@ -65,7 +67,8 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :null, "Invalid counter32 #{inspect(value)} should become :null type"
         assert decoded_value == expected, "Invalid counter32 #{inspect(value)} should become #{inspect(expected)}"
       end)
     end
@@ -90,8 +93,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:gauge32, value}, "Gauge32 #{value} failed round-trip"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :gauge32, "Gauge32 #{value} failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "Gauge32 #{value} failed round-trip"
       end)
     end
     
@@ -113,13 +117,15 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
         if value <= 4294967295 do
-          assert decoded_value == {:gauge32, value}, "Gauge32 #{description} (#{value}) failed"
+          assert decoded_type == :gauge32, "Gauge32 #{description} (#{value}) failed: wrong type #{decoded_type}"
+          assert decoded_value == value, "Gauge32 #{description} (#{value}) failed"
         else
-          # Values exceeding 32-bit should gracefully degrade to 0
-          assert decoded_value == {:gauge32, 0}, "Gauge32 #{description} (#{value}) should become {:gauge32, 0}"
+          # Values exceeding 32-bit should become :null
+          assert decoded_type == :null, "Gauge32 #{description} (#{value}) failed: wrong type #{decoded_type}"
+          assert decoded_value == :null, "Gauge32 #{description} (#{value}) should become :null"
         end
       end)
     end
@@ -144,8 +150,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:timeticks, value}, "TimeTicks #{description} (#{value}) failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :timeticks, "TimeTicks #{description} (#{value}) failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "TimeTicks #{description} (#{value}) failed"
       end)
     end
     
@@ -165,8 +172,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:timeticks, value}, "TimeTicks rollover value #{value} failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :timeticks, "TimeTicks rollover value #{value} failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "TimeTicks rollover value #{value} failed"
       end)
     end
   end
@@ -189,8 +197,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:counter64, value}, "Counter64 #{description} (#{value}) failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :counter64, "Counter64 #{description} (#{value}) failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "Counter64 #{description} (#{value}) failed"
       end)
     end
     
@@ -211,8 +220,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:counter64, value}, "Counter64 #{description} (#{value}) failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :counter64, "Counter64 #{description} (#{value}) failed: wrong type #{decoded_type}"
+        assert decoded_value == value, "Counter64 #{description} (#{value}) failed"
       end)
     end
     
@@ -220,7 +230,7 @@ defmodule SnmpLib.AdvancedTypesTest do
       invalid_values = [
         {-1, :null},  # Negative values become :null
         {"not_a_number", :null},  # Non-numeric values become :null
-        {18446744073709551616, {:counter64, 0}}  # Values exceeding 64-bit become counter64 with value 0
+        {18446744073709551616, :null}  # Values exceeding 64-bit become :null
       ]
       
       Enum.each(invalid_values, fn {value, expected} ->
@@ -231,7 +241,8 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :null, "Invalid counter64 #{inspect(value)} should become :null type"
         assert decoded_value == expected, "Invalid counter64 #{inspect(value)} should become #{inspect(expected)}"
       end)
     end
@@ -257,8 +268,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:ip_address, ip_binary}, "IP Address #{description} failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :ip_address, "IP Address #{description} failed: wrong type #{decoded_type}"
+        assert decoded_value == ip_binary, "IP Address #{description} failed"
       end)
     end
     
@@ -278,8 +290,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:ip_address, ip_binary}, "IP Address #{description} failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :ip_address, "IP Address #{description} failed: wrong type #{decoded_type}"
+        assert decoded_value == ip_binary, "IP Address #{description} failed"
       end)
     end
     
@@ -299,8 +312,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         # Should fall back to :null for invalid IP formats
+        assert decoded_type == :null, "Invalid IP #{inspect(invalid_ip)} should become :null type"
         assert decoded_value == :null, "Invalid IP #{inspect(invalid_ip)} should become :null"
       end)
     end
@@ -329,8 +343,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:opaque, binary_data}, "Opaque #{description} failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :opaque, "Opaque #{description} failed: wrong type #{decoded_type}"
+        assert decoded_value == binary_data, "Opaque #{description} failed"
       end)
     end
     
@@ -354,16 +369,17 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
         case expectation do
           :expect_exact ->
-            assert decoded_value == {:opaque, large_data}, "Opaque data of size #{size} failed"
-            assert byte_size(elem(decoded_value, 1)) == size, "Size mismatch for #{size} byte opaque data"
+            assert decoded_type == :opaque, "Opaque data of size #{size} failed: wrong type #{decoded_type}"
+            assert decoded_value == large_data, "Opaque data of size #{size} failed"
+            assert byte_size(decoded_value) == size, "Size mismatch for #{size} byte opaque data"
           :expect_truncated ->
             # Large data gets truncated to around 130 bytes in current implementation
-            assert elem(decoded_value, 0) == :opaque, "Opaque data should still be opaque type"
-            actual_size = byte_size(elem(decoded_value, 1))
+            assert decoded_type == :opaque, "Truncated opaque data should still be opaque type"
+            actual_size = byte_size(decoded_value)
             assert actual_size <= 130, "Truncated opaque data should be <= 130 bytes, got #{actual_size}"
         end
       end)
@@ -386,8 +402,9 @@ defmodule SnmpLib.AdvancedTypesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        assert decoded_value == {:opaque, pattern}, "Opaque #{description} failed"
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :opaque, "Opaque #{description} failed: wrong type #{decoded_type}"
+        assert decoded_value == pattern, "Opaque #{description} failed"
       end)
     end
   end

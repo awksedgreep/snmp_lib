@@ -736,16 +736,16 @@ defmodule SnmpLib.PDU do
   defp encode_snmp_value_fast(:integer, value) when is_integer(value), do: encode_integer_fast(value)
   defp encode_snmp_value_fast(:string, value) when is_binary(value), do: encode_octet_string_fast(value)
   defp encode_snmp_value_fast(:octet_string, value) when is_binary(value), do: encode_octet_string_fast(value)
-  defp encode_snmp_value_fast(:counter32, value) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:counter32, value) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@counter32, value)
   end
-  defp encode_snmp_value_fast(:gauge32, value) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:gauge32, value) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@gauge32, value)
   end
-  defp encode_snmp_value_fast(:timeticks, value) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:timeticks, value) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@timeticks, value)
   end
-  defp encode_snmp_value_fast(:counter64, value) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:counter64, value) when is_integer(value) and value >= 0 and value <= 18446744073709551615 do
     encode_counter64(@counter64, value)
   end
   defp encode_snmp_value_fast(:ip_address, value) when is_binary(value) and byte_size(value) == 4 do
@@ -788,16 +788,16 @@ defmodule SnmpLib.PDU do
       <<@null, 0x00>>
     end
   end
-  defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@counter32, value)
   end
-  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@gauge32, value)
   end
-  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
     encode_unsigned_integer(@timeticks, value)
   end
-  defp encode_snmp_value_fast(:auto, {:counter64, value}) when is_integer(value) and value >= 0 do
+  defp encode_snmp_value_fast(:auto, {:counter64, value}) when is_integer(value) and value >= 0 and value <= 18446744073709551615 do
     encode_counter64(@counter64, value)
   end
   defp encode_snmp_value_fast(:auto, {:ip_address, value}) when is_binary(value) and byte_size(value) == 4 do

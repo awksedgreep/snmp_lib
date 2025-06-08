@@ -25,11 +25,9 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        expected = {:object_identifier, expected_string}
         
-        assert decoded_value == expected, 
-          "First two subidentifiers #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_value == oid, 
+          "First two subidentifiers #{description} failed: expected #{inspect(oid)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -119,8 +117,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
       # Test explicit type with different input formats
       explicit_tests = [
         # Valid inputs
-        {[1, 3, 6, 1, 2, 1, 1, 1, 0], {:object_identifier, "1.3.6.1.2.1.1.1.0"}, "valid list"},
-        {"1.3.6.1.2.1.1.1.0", {:object_identifier, "1.3.6.1.2.1.1.1.0"}, "valid string"},
+        {[1, 3, 6, 1, 2, 1, 1, 1, 0], [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid list"},
+        {"1.3.6.1.2.1.1.1.0", [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid string"},
         
         # Invalid inputs that should become :null
         {[], :null, "empty list"},
@@ -168,10 +166,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(long_oid, ".")
-        expected = {:object_identifier, expected_string}
         
-        assert decoded_value == expected, 
+        assert decoded_value == long_oid, 
           "Long OID with #{length(long_oid)} components failed: got #{inspect(decoded_value)}"
       end)
     end
@@ -205,10 +201,8 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
       results = Task.await_many(tasks, 5000)
       
       Enum.each(results, fn {original_oid, decoded_value} ->
-        expected_string = Enum.join(original_oid, ".")
-        expected = {:object_identifier, expected_string}
-        assert decoded_value == expected, 
-          "Concurrent test failed for OID #{inspect(original_oid)}: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_value == original_oid, 
+          "Concurrent test failed for OID #{inspect(original_oid)}: expected #{inspect(original_oid)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -227,11 +221,7 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         test_oid = [1, 3, 6, 1, 4, 1, value]
         
         # Test multiple round trips to ensure ASN.1 compliance
-        expected_string = Enum.join(test_oid, ".")
-        original = {:object_identifier, expected_string}
-        
-        # Round trip 1
-        varbinds1 = [{[1, 3, 6, 1], :auto, original}]
+        varbinds1 = [{[1, 3, 6, 1], :object_identifier, test_oid}]
         pdu1 = PDU.build_response(1, 0, 0, varbinds1)
         message1 = PDU.build_message(pdu1, "public", :v2c)
         
@@ -239,8 +229,7 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded1} = PDU.decode_message(encoded1)
         {_, _, result1} = hd(decoded1.pdu.varbinds)
         
-        # Round trip 2
-        varbinds2 = [{[1, 3, 6, 1], :auto, result1}]
+        varbinds2 = [{[1, 3, 6, 1], :object_identifier, result1}]
         pdu2 = PDU.build_response(2, 0, 0, varbinds2)
         message2 = PDU.build_message(pdu2, "public", :v2c)
         
@@ -248,9 +237,9 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
         {:ok, decoded2} = PDU.decode_message(encoded2)
         {_, _, result2} = hd(decoded2.pdu.varbinds)
         
-        assert result1 == original, "First round trip failed for #{description} (#{value})"
-        assert result2 == original, "Second round trip failed for #{description} (#{value})"
-        assert result1 == result2, "Round trip results differ for #{description} (#{value})"
+        assert result1 == test_oid, "First round trip failed for #{description}"
+        assert result2 == test_oid, "Second round trip failed for #{description}"
+        assert result1 == result2, "Round trip results differ for #{description}"
       end)
     end
   end

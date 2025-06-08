@@ -25,10 +25,10 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, oid_string}
+        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         
-        assert decoded_value == expected, 
-          "String OID #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_value == expected_list, 
+          "String OID #{description} failed: expected #{inspect(expected_list)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -50,11 +50,12 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, oid_string}
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         
-        assert decoded_value == expected, 
-          "Explicit string OID #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_type == :object_identifier
+        assert decoded_value == expected_list, 
+          "Explicit string OID #{description} failed: expected #{inspect(expected_list)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -78,10 +79,10 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected = {:object_identifier, oid_string}
+        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
         
-        assert decoded_value == expected, 
-          "Large enterprise OID #{oid_string} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+        assert decoded_value == expected_list, 
+          "Large enterprise OID #{oid_string} failed: expected #{inspect(expected_list)}, got #{inspect(decoded_value)}"
       end)
     end
     
@@ -149,10 +150,10 @@ defmodule SnmpLib.ObjectIdentifierStringTest do
         {:ok, decoded3} = PDU.decode_message(encoded3)
         {_, _, value3} = hd(decoded3.pdu.varbinds)
         
-        expected = {:object_identifier, oid_string}
-        assert value1 == expected, "First cycle failed for #{oid_string}"
-        assert value2 == expected, "Second cycle failed for #{oid_string}" 
-        assert value3 == expected, "Third cycle failed for #{oid_string}"
+        expected_list = String.split(oid_string, ".") |> Enum.map(&String.to_integer/1)
+        assert value1 == expected_list, "First cycle failed for #{oid_string}"
+        assert value2 == expected_list, "Second cycle failed for #{oid_string}" 
+        assert value3 == expected_list, "Third cycle failed for #{oid_string}"
         assert value1 == value2, "Values differ between cycle 1 and 2 for #{oid_string}"
         assert value2 == value3, "Values differ between cycle 2 and 3 for #{oid_string}"
       end)

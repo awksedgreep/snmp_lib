@@ -55,16 +55,17 @@ defmodule SnmpLib.EdgeCasesTest do
         {:ok, encoded} = PDU.encode_message(message)
         {:ok, decoded} = PDU.decode_message(encoded)
         
-        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
         
         if size <= 100 do
           # Small sizes should work exactly
-          assert decoded_value == {:opaque, large_data}, "Large opaque data (#{size} bytes) failed"
-          assert byte_size(elem(decoded_value, 1)) == size, "Size mismatch for #{size} byte data"
+          assert decoded_type == :opaque
+          assert decoded_value == large_data, "Large opaque data (#{size} bytes) failed"
+          assert byte_size(decoded_value) == size, "Size mismatch for #{size} byte data"
         else
           # Large sizes get truncated to around 130 bytes in current implementation
-          assert elem(decoded_value, 0) == :opaque, "Opaque data should still be opaque type"
-          actual_size = byte_size(elem(decoded_value, 1))
+          assert decoded_type == :opaque, "Opaque data should still be opaque type"
+          actual_size = byte_size(decoded_value)
           assert actual_size <= 130, "Large opaque data should be truncated to <= 130 bytes, got #{actual_size}"
         end
       end)
@@ -161,18 +162,37 @@ defmodule SnmpLib.EdgeCasesTest do
       {:ok, encoded} = PDU.encode_message(message)
       {:ok, decoded} = PDU.decode_message(encoded)
       
-      decoded_values = Enum.map(decoded.pdu.varbinds, fn {_, _, value} -> value end)
+      decoded_varbinds = decoded.pdu.varbinds
       
-      # Valid values should pass through
-      assert Enum.at(decoded_values, 0) == "Valid string"
-      assert Enum.at(decoded_values, 1) == {:counter32, 12345}
-      assert Enum.at(decoded_values, 4) == {:object_identifier, "1.3.6.1"}
-      assert Enum.at(decoded_values, 6) == {:timeticks, 98765}
+      # Valid values should pass through with proper types
+      {_, type0, value0} = Enum.at(decoded_varbinds, 0)
+      assert type0 == :octet_string
+      assert value0 == "Valid string"
+      
+      {_, type1, value1} = Enum.at(decoded_varbinds, 1)
+      assert type1 == :counter32
+      assert value1 == 12345
+      
+      {_, type4, value4} = Enum.at(decoded_varbinds, 4)
+      assert type4 == :object_identifier
+      assert value4 == [1, 3, 6, 1]
+      
+      {_, type6, value6} = Enum.at(decoded_varbinds, 6)
+      assert type6 == :timeticks
+      assert value6 == 98765
       
       # Invalid values should become :null
-      assert Enum.at(decoded_values, 2) == :null  # invalid_type
-      assert Enum.at(decoded_values, 3) == :null  # gauge32 with string
-      assert Enum.at(decoded_values, 5) == :null  # negative counter64
+      {_, type2, value2} = Enum.at(decoded_varbinds, 2)
+      assert type2 == :null
+      assert value2 == :null
+      
+      {_, type3, value3} = Enum.at(decoded_varbinds, 3)
+      assert type3 == :null
+      assert value3 == :null
+      
+      {_, type5, value5} = Enum.at(decoded_varbinds, 5)
+      assert type5 == :null
+      assert value5 == :null
     end
     
     test "handles extreme PDU sizes" do

@@ -25,8 +25,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "OID #{description} failed with explicit type"
+        assert decoded_value == oid, "OID #{description} failed with explicit type"
         
         # Test with :auto type and tuple format
         varbinds = [{oid, :auto, {:object_identifier, oid}}]
@@ -37,8 +36,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "OID #{description} failed with auto tuple"
+        assert decoded_value == oid, "OID #{description} failed with auto type"
         
         # Test with :auto type and raw OID list (auto-detection)
         varbinds = [{oid, :auto, oid}]
@@ -49,8 +47,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "OID #{description} failed with auto detection"
+        assert decoded_value == oid, "OID #{description} failed with auto detection"
       end)
     end
     
@@ -75,8 +72,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "Interface OID #{description} failed"
+        assert decoded_value == oid, "Interface OID #{description} failed"
       end)
     end
     
@@ -100,8 +96,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "Enterprise OID #{description} failed"
+        assert decoded_value == oid, "Enterprise OID #{description} failed"
       end)
     end
     
@@ -125,10 +120,8 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "Long OID #{inspect(oid)} failed"
-        decoded_parts = String.split(elem(decoded_value, 1), ".")
-        assert length(decoded_parts) == length(oid), "OID length mismatch"
+        assert decoded_value == oid, "Long OID #{oid} failed"
+        assert length(decoded_value) == length(oid), "OID length mismatch"
       end)
     end
     
@@ -152,8 +145,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
         {:ok, decoded} = PDU.decode_message(encoded)
         
         {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-        expected_string = Enum.join(oid, ".")
-        assert decoded_value == {:object_identifier, expected_string}, "Large subid OID #{description} failed"
+        assert decoded_value == oid, "Large subid OID #{description} failed"
       end)
     end
     
@@ -177,8 +169,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
           {:ok, encoded} ->
             {:ok, decoded} = PDU.decode_message(encoded)
             {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
-            expected_string = Enum.join(oid, ".")
-            assert decoded_value == {:object_identifier, expected_string}, "Minimal OID #{description} failed"
+            assert decoded_value == oid, "Minimal OID #{description} failed"
           {:error, _} ->
             # Some minimal OIDs may fail validation during encoding
             :ok
@@ -242,8 +233,7 @@ defmodule SnmpLib.ObjectIdentifierTest do
             {:ok, decoded} = PDU.decode_message(encoded)
             {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
             # Should convert string to proper OID string
-            assert decoded_value == {:object_identifier, oid_string}, 
-              "String OID #{oid_string} should remain as string format"
+            assert decoded_value == expected_list, "String OID #{oid_string} should remain as string format"
           {:error, _} ->
             # String format might not be supported, which is acceptable
             :ok
