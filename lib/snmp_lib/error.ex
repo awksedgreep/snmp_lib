@@ -176,27 +176,21 @@ defmodule SnmpLib.Error do
   """
   @spec error_name(error_status()) :: String.t()
   def error_name(0), do: "no_error"
-  def error_name(@no_error), do: "no_error"
   def error_name(:no_error), do: "no_error"
   
   def error_name(1), do: "too_big"  
-  def error_name(@too_big), do: "too_big"
   def error_name(:too_big), do: "too_big"
   
   def error_name(2), do: "no_such_name"
-  def error_name(@no_such_name), do: "no_such_name"
   def error_name(:no_such_name), do: "no_such_name"
   
   def error_name(3), do: "bad_value"
-  def error_name(@bad_value), do: "bad_value"
   def error_name(:bad_value), do: "bad_value"
   
   def error_name(4), do: "read_only"
-  def error_name(@read_only), do: "read_only"
   def error_name(:read_only), do: "read_only"
   
   def error_name(5), do: "gen_err"
-  def error_name(@gen_err), do: "gen_err"
   def error_name(:gen_err), do: "gen_err"
   
   # SNMPv2c additional error codes

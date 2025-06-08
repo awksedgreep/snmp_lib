@@ -30,7 +30,7 @@ defmodule SnmpLib.Transport do
   require Logger
 
   @type socket :: :gen_udp.socket()
-  @type address :: :inet.socket_address() | :inet.hostname()
+  @type address :: :inet.socket_address() | :inet.hostname() | binary()
   @type port_number :: :inet.port_number()
   @type packet_data :: binary()
   @type socket_options :: [:gen_udp.option()]
@@ -77,7 +77,7 @@ defmodule SnmpLib.Transport do
             
             case :gen_udp.open(port, [:binary, {:ip, resolved_address} | merged_options]) do
               {:ok, socket} ->
-                Logger.debug("Created UDP socket bound to #{format_address(resolved_address)}:#{port}")
+                Logger.debug("Created UDP socket bound to #{format_endpoint(resolved_address, port)}")
                 {:ok, socket}
               {:error, reason} ->
                 Logger.error("Failed to create UDP socket: #{inspect(reason)}")
@@ -114,7 +114,7 @@ defmodule SnmpLib.Transport do
         
         case :gen_udp.open(0, [:binary, {:ip, resolved_address} | client_options]) do
           {:ok, socket} ->
-            Logger.debug("Created UDP socket bound to #{format_address(resolved_address)}:0")
+            Logger.debug("Created UDP socket bound to #{format_endpoint(resolved_address, 0)}")
             {:ok, socket}
           {:error, reason} ->
             Logger.error("Failed to create UDP socket: #{inspect(reason)}")
@@ -151,7 +151,7 @@ defmodule SnmpLib.Transport do
           
           case :gen_udp.open(port, [:binary, {:ip, resolved_address} | merged_options]) do
             {:ok, socket} ->
-              Logger.debug("Created UDP socket bound to #{format_address(resolved_address)}:#{port}")
+              Logger.debug("Created UDP socket bound to #{format_endpoint(resolved_address, port)}")
               {:ok, socket}
             {:error, reason} ->
               Logger.error("Failed to create UDP socket: #{inspect(reason)}")
@@ -193,7 +193,7 @@ defmodule SnmpLib.Transport do
       {{:ok, resolved_address}, true} ->
         case :gen_udp.send(socket, resolved_address, dest_port, data) do
           :ok ->
-            Logger.debug("Sent #{byte_size(data)} bytes to #{format_address(resolved_address)}:#{dest_port}")
+            Logger.debug("Sent #{byte_size(data)} bytes to #{format_endpoint(resolved_address, dest_port)}")
             :ok
           {:error, reason} ->
             Logger.error("Failed to send packet: #{inspect(reason)}")
@@ -230,7 +230,7 @@ defmodule SnmpLib.Transport do
   def receive_packet(socket, timeout \\ 5000) when is_integer(timeout) and timeout >= 0 do
     case :gen_udp.recv(socket, 0, timeout) do
       {:ok, {from_address, from_port, data}} when is_binary(data) ->
-        Logger.debug("Received #{byte_size(data)} bytes from #{format_address(from_address)}:#{from_port}")
+        Logger.debug("Received #{byte_size(data)} bytes from #{format_endpoint(from_address, from_port)}")
         {:ok, {data, from_address, from_port}}
       {:ok, invalid_response} ->
         Logger.error("Invalid UDP response format: #{inspect(invalid_response)}")
@@ -279,14 +279,9 @@ defmodule SnmpLib.Transport do
   """
   @spec close_socket(socket()) :: :ok
   def close_socket(socket) do
-    case :gen_udp.close(socket) do
-      :ok ->
-        Logger.debug("Closed UDP socket")
-        :ok
-      {:error, reason} ->
-        Logger.warning("Error closing socket: #{inspect(reason)}")
-        :ok  # Return :ok anyway since socket is effectively closed
-    end
+    :ok = :gen_udp.close(socket)
+    Logger.debug("Closed UDP socket")
+    :ok
   end
 
   ## Address and Network Utilities
@@ -294,20 +289,18 @@ defmodule SnmpLib.Transport do
   @doc """
   Resolves an address to an IP tuple.
   
-  ## Parameters
-  
-  - `address`: IP address string, hostname, or IP tuple
-  
-  ## Returns
-  
-  - `{:ok, ip_tuple}` on success
-  - `{:error, reason}` on failure
+  Accepts:
+  - IP address strings (e.g., "192.168.1.1")
+  - Hostnames (e.g., "localhost")
+  - IP tuples (e.g., {192, 168, 1, 1})
   
   ## Examples
   
-      {:ok, {192, 168, 1, 100}} = SnmpLib.Transport.resolve_address("192.168.1.100")
-      {:ok, {127, 0, 0, 1}} = SnmpLib.Transport.resolve_address("localhost")
-      {:ok, {192, 168, 1, 100}} = SnmpLib.Transport.resolve_address({192, 168, 1, 100})
+      iex> SnmpLib.Transport.resolve_address("192.168.1.1")
+      {:ok, {192, 168, 1, 1}}
+      
+      iex> SnmpLib.Transport.resolve_address({192, 168, 1, 1})
+      {:ok, {192, 168, 1, 1}}
   """
   @spec resolve_address(address()) :: {:ok, :inet.socket_address()} | {:error, atom()}
   def resolve_address(address) when is_tuple(address) do
@@ -589,8 +582,4 @@ defmodule SnmpLib.Transport do
       end
     end
   end
-
-  defp format_address({a, b, c, d}), do: "#{a}.#{b}.#{c}.#{d}"
-  defp format_address(address) when is_binary(address), do: address
-  defp format_address(address), do: inspect(address)
 end

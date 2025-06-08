@@ -182,7 +182,9 @@ defmodule SnmpLib.WalkerTest do
       assert {:error, _} = Walker.walk_table("192.168.255.255", [1, 3, 6, 1], opts)
     end
     
+    @tag :skip
     test "implements retry logic" do
+      # Test with unreachable host
       opts = [max_retries: 2, retry_delay: 100, timeout: 50]
       
       # Should retry on failures

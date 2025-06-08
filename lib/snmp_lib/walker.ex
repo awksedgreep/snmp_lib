@@ -275,24 +275,24 @@ defmodule SnmpLib.Walker do
       host: host,
       current_oid: table_oid,
       table_prefix: table_oid,
-      opts: opts,
       accumulated: [],
+      opts: opts,
       bulk_size: opts[:max_repetitions] || @default_max_repetitions,
-      retries: 0
+      adaptive_bulk: opts[:adaptive_bulk] || false
     }
     
     bulk_walk_loop(initial_state)
   end
   
-  defp bulk_walk_subtree(host, base_oid, opts) do
+  defp bulk_walk_subtree(host, subtree_oid, opts) do
     initial_state = %{
       host: host,
-      current_oid: base_oid,
-      subtree_prefix: base_oid,
-      opts: opts,
+      current_oid: subtree_oid,
+      subtree_prefix: subtree_oid,
       accumulated: [],
+      opts: opts,
       bulk_size: opts[:max_repetitions] || @default_max_repetitions,
-      retries: 0
+      adaptive_bulk: opts[:adaptive_bulk] || false
     }
     
     bulk_walk_subtree_loop(initial_state)
@@ -309,11 +309,13 @@ defmodule SnmpLib.Walker do
         
         if continue? and length(valid_varbinds) > 0 do
           # Get last OID for next request
-          {last_oid, _} = List.last(valid_varbinds)
+          last_oid = case List.last(valid_varbinds) do
+            {oid, _type, _value} -> oid
+            {oid, _value} -> oid
+          end
           new_state = %{state | 
             current_oid: last_oid,
-            accumulated: valid_varbinds ++ state.accumulated,
-            retries: 0
+            accumulated: valid_varbinds ++ state.accumulated
           }
           bulk_walk_loop(new_state)
         else
@@ -321,14 +323,7 @@ defmodule SnmpLib.Walker do
         end
         
       {:error, reason} ->
-        if should_retry?(state) and should_retry_error?(reason, state) do
-          Logger.debug("Bulk walk retry #{state.retries + 1}: #{inspect(reason)}")
-          new_state = %{state | retries: state.retries + 1}
-          :timer.sleep(state.opts[:retry_delay] || @default_retry_delay)
-          bulk_walk_loop(new_state)
-        else
-          {:error, reason}
-        end
+        {:error, reason}
     end
   end
   
@@ -341,11 +336,13 @@ defmodule SnmpLib.Walker do
         {valid_varbinds, continue?} = filter_subtree_varbinds(varbinds, state.subtree_prefix)
         
         if continue? and length(valid_varbinds) > 0 do
-          {last_oid, _} = List.last(valid_varbinds)
+          last_oid = case List.last(valid_varbinds) do
+            {oid, _type, _value} -> oid
+            {oid, _value} -> oid
+          end
           new_state = %{state | 
             current_oid: last_oid,
-            accumulated: valid_varbinds ++ state.accumulated,
-            retries: 0
+            accumulated: valid_varbinds ++ state.accumulated
           }
           bulk_walk_subtree_loop(new_state)
         else
@@ -353,13 +350,7 @@ defmodule SnmpLib.Walker do
         end
         
       {:error, reason} ->
-        if should_retry?(state) and should_retry_error?(reason, state) do
-          new_state = %{state | retries: state.retries + 1}
-          :timer.sleep(state.opts[:retry_delay] || @default_retry_delay)
-          bulk_walk_subtree_loop(new_state)
-        else
-          {:error, reason}
-        end
+        {:error, reason}
     end
   end
   
@@ -390,14 +381,72 @@ defmodule SnmpLib.Walker do
     sequential_walk_subtree_loop(initial_state)
   end
   
-  defp sequential_walk_loop(_state) do
-    # Sequential walking requires GETNEXT operation which is not implemented
-    {:error, :getnext_not_supported}
+  defp sequential_walk_loop(state) do
+    case SnmpLib.Manager.get_next(state.host, state.current_oid, state.opts) do
+      {:ok, {next_oid, value}} ->
+        # Check if we're still in the table
+        if oid_in_table?(next_oid, state.table_prefix) do
+          varbind = {next_oid, :auto, value}
+          new_state = %{state | 
+            current_oid: next_oid,
+            accumulated: [varbind | state.accumulated],
+            retries: 0
+          }
+          sequential_walk_loop(new_state)
+        else
+          # We've walked past the table
+          {:ok, Enum.reverse(state.accumulated)}
+        end
+        
+      {:error, :no_such_name} ->
+        # End of MIB or table
+        {:ok, Enum.reverse(state.accumulated)}
+        
+      {:error, reason} ->
+        max_retries = state.opts[:max_retries] || @default_max_retries
+        if state.retries < max_retries do
+          # Retry on transient errors
+          new_state = %{state | retries: state.retries + 1}
+          sequential_walk_loop(new_state)
+        else
+          # Max retries exceeded
+          {:error, reason}
+        end
+    end
   end
   
-  defp sequential_walk_subtree_loop(_state) do
-    # Sequential walking requires GETNEXT operation which is not implemented
-    {:error, :getnext_not_supported}
+  defp sequential_walk_subtree_loop(state) do
+    case SnmpLib.Manager.get_next(state.host, state.current_oid, state.opts) do
+      {:ok, {next_oid, value}} ->
+        # Check if we're still in the subtree
+        if oid_in_subtree?(next_oid, state.subtree_prefix) do
+          varbind = {next_oid, :auto, value}
+          new_state = %{state | 
+            current_oid: next_oid,
+            accumulated: [varbind | state.accumulated],
+            retries: 0
+          }
+          sequential_walk_subtree_loop(new_state)
+        else
+          # We've walked past the subtree
+          {:ok, Enum.reverse(state.accumulated)}
+        end
+        
+      {:error, :no_such_name} ->
+        # End of MIB or subtree
+        {:ok, Enum.reverse(state.accumulated)}
+        
+      {:error, reason} ->
+        max_retries = state.opts[:max_retries] || @default_max_retries
+        if state.retries < max_retries do
+          # Retry on transient errors
+          new_state = %{state | retries: state.retries + 1}
+          sequential_walk_subtree_loop(new_state)
+        else
+          # Max retries exceeded
+          {:error, reason}
+        end
+    end
   end
   
   # Request operations
@@ -433,7 +482,11 @@ defmodule SnmpLib.Walker do
         {valid_varbinds, continue?} = filter_table_varbinds(varbinds, state.table_prefix)
         
         if continue? and length(valid_varbinds) > 0 do
-          {last_oid, _} = List.last(valid_varbinds)
+          # Get last OID for next request
+          last_oid = case List.last(valid_varbinds) do
+            {oid, _type, _value} -> oid
+            {oid, _value} -> oid
+          end
           new_state = %{state | current_oid: last_oid}
           {[valid_varbinds], new_state}
         else
@@ -450,13 +503,20 @@ defmodule SnmpLib.Walker do
   
   # Helper functions
   defp filter_table_varbinds(varbinds, table_prefix) do
-    valid_varbinds = Enum.take_while(varbinds, fn {oid, value} ->
-      case value do
-        {:end_of_mib_view, _} -> false
-        {:no_such_object, _} -> false
-        {:no_such_instance, _} -> false
-        _ -> oid_in_table?(oid, table_prefix)
-      end
+    valid_varbinds = Enum.take_while(varbinds, fn
+      {oid, type, value} ->
+        case value do
+          nil when is_atom(type) and type in [:end_of_mib_view, :no_such_object, :no_such_instance] -> false
+          _ -> oid_in_table?(oid, table_prefix)
+        end
+      {oid, value} ->
+        # Handle legacy 2-tuple format
+        case value do
+          {:end_of_mib_view, _} -> false
+          {:no_such_object, _} -> false
+          {:no_such_instance, _} -> false
+          _ -> oid_in_table?(oid, table_prefix)
+        end
     end)
     
     continue? = length(valid_varbinds) == length(varbinds)
@@ -464,13 +524,20 @@ defmodule SnmpLib.Walker do
   end
   
   defp filter_subtree_varbinds(varbinds, subtree_prefix) do
-    valid_varbinds = Enum.take_while(varbinds, fn {oid, value} ->
-      case value do
-        {:end_of_mib_view, _} -> false
-        {:no_such_object, _} -> false
-        {:no_such_instance, _} -> false
-        _ -> oid_in_subtree?(oid, subtree_prefix)
-      end
+    valid_varbinds = Enum.take_while(varbinds, fn
+      {oid, type, value} ->
+        case value do
+          nil when is_atom(type) and type in [:end_of_mib_view, :no_such_object, :no_such_instance] -> false
+          _ -> oid_in_subtree?(oid, subtree_prefix)
+        end
+      {oid, value} ->
+        # Handle legacy 2-tuple format
+        case value do
+          {:end_of_mib_view, _} -> false
+          {:no_such_object, _} -> false
+          {:no_such_instance, _} -> false
+          _ -> oid_in_subtree?(oid, subtree_prefix)
+        end
     end)
     
     continue? = length(valid_varbinds) == length(varbinds)
@@ -488,30 +555,15 @@ defmodule SnmpLib.Walker do
   defp extract_column_data(varbinds, column_oid) do
     column_prefix_length = length(column_oid)
     
-    Enum.map(varbinds, fn {oid, value} ->
-      index_oid = Enum.drop(oid, column_prefix_length)
-      {index_oid, value}
+    Enum.map(varbinds, fn 
+      {oid, _type, value} ->
+        index_oid = Enum.drop(oid, column_prefix_length)
+        {index_oid, value}
+      {oid, value} ->
+        # Handle legacy 2-tuple format
+        index_oid = Enum.drop(oid, column_prefix_length)
+        {index_oid, value}
     end)
-  end
-  
-  defp should_retry?(state) do
-    max_retries = state.opts[:max_retries] || @default_max_retries
-    state.retries < max_retries
-  end
-  
-  # Check if an error should trigger a retry
-  defp should_retry_error?(reason, state) do
-    case reason do
-      {:network_error, :hostname_resolution_failed} -> false
-      {:network_error, _} -> false
-      :getnext_not_supported -> false
-      :timeout -> 
-        # Only retry timeouts if max_retries is explicitly configured
-        # This allows specific retry tests to work while preventing infinite loops
-        # on unreachable hosts when retries aren't explicitly requested
-        state.opts[:_explicit_max_retries] == true
-      _ -> true
-    end
   end
   
   defp normalize_oid(oid) when is_list(oid), do: oid
