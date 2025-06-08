@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2025-06-08
+
+### Fixed
+
+- **Transport Module**: Fixed compilation errors and warnings
+  - Corrected `close_socket/1` to handle `:gen_udp.close/1` return value properly
+  - Removed duplicate private function definitions
+  - Consolidated logging to use public `format_endpoint/2` function
+
+- **Walker Module**: Eliminated unreachable code warnings
+  - Removed redundant SNMP v1 version checks in bulk walk functions
+  - Restored missing `bulk_walk_loop/1` and `bulk_walk_subtree_loop/1` functions
+  - Removed unused retry logic functions (`should_retry?/1` and `should_retry_error?/2`)
+  - Simplified error handling patterns
+
+- **Dialyzer Configuration**: Set up proper warning suppression
+  - Created `.dialyzer_ignore.exs` file for known false positives
+  - Configured PLT storage in `priv/plts/` directory
+  - Reduced noise from false positive "unused function" warnings
+
+### Changed
+
+- **Code Quality**: Improved overall code maintainability
+  - Eliminated all Elixir compiler warnings
+  - Cleaned up redundant code paths
+  - All 772 tests continue to pass
+
 ## [1.0.2] - 2025-06-06
 
 ### Added
