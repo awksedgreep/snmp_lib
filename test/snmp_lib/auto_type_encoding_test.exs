@@ -46,9 +46,82 @@ defmodule SnmpLib.AutoTypeEncodingTest do
       end)
     end
     
-    test "raises ArgumentError for invalid tuple formats with :auto type" do
-      # Test invalid tuple formats that should raise ArgumentError
-      invalid_tuple_tests = [
+    test "handles valid string OIDs with :auto type" do
+      # Test cases that should now succeed due to string OID support
+      string_oid_tests = [
+        {{:object_identifier, "1.3.6.1.2.1.1.1.0"}, "object_identifier tuple with valid string"}
+      ]
+      
+      Enum.each(string_oid_tests, fn {test_value, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        case PDU.encode_message(message) do
+          {:ok, encoded} ->
+            # Expected behavior - string OIDs should now be supported
+            {:ok, decoded} = PDU.decode_message(encoded)
+            {_oid, type, value} = hd(decoded.pdu.varbinds)
+            assert type == :object_identifier
+            assert value == [1, 3, 6, 1, 2, 1, 1, 1, 0]
+          {:error, error} ->
+            flunk("Expected success for #{description}, but got error: #{inspect(error)}")
+        end
+      end)
+    end
+    
+    test "handles exception tuples with :auto type" do
+      # Test that exception tuples encode successfully (they should NOT raise errors)
+      exception_tuple_tests = [
+        {{:no_such_object, nil}, "no_such_object exception tuple"},
+        {{:no_such_instance, nil}, "no_such_instance exception tuple"},
+        {{:end_of_mib_view, nil}, "end_of_mib_view exception tuple"}
+      ]
+      
+      Enum.each(exception_tuple_tests, fn {test_value, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        case PDU.encode_message(message) do
+          {:ok, _encoded} ->
+            # Expected behavior - exception tuples should encode successfully
+            :ok
+          {:error, reason} ->
+            flunk("Expected #{description} to encode successfully, but got error: #{inspect(reason)}")
+        end
+      end)
+    end
+    
+    test "handles structural errors gracefully with :auto type" do
+      # Test invalid tuple formats that now encode as :null instead of raising errors
+      # This reflects our design decision for graceful error handling
+      graceful_error_tests = [
+        {{:object_identifier, []}, "empty OID list"},
+        {{:object_identifier, [1]}, "too short OID list"}
+      ]
+      
+      Enum.each(graceful_error_tests, fn {test_value, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        case PDU.encode_message(message) do
+          {:ok, encoded} ->
+            # Expected behavior - invalid formats should encode as :null
+            {:ok, decoded} = PDU.decode_message(encoded)
+            {_oid, type, value} = hd(decoded.pdu.varbinds)
+            assert type == :null
+            assert value == :null
+          {:error, reason} ->
+            flunk("Expected graceful handling for #{description}, but got error: #{inspect(reason)}")
+        end
+      end)
+    end
+    
+    test "converts invalid values to null with :auto type" do
+      # Test invalid values that should be converted to null (value range/type errors)
+      null_conversion_tests = [
         {{:counter32, -1}, "negative counter32"},
         {{:counter32, "not_a_number"}, "non-numeric counter32"},
         {{:gauge32, -100}, "negative gauge32"},
@@ -56,47 +129,20 @@ defmodule SnmpLib.AutoTypeEncodingTest do
         {{:counter64, -5}, "negative counter64"},
         {{:ip_address, <<192, 168, 1>>}, "short IP address"},
         {{:ip_address, "192.168.1.1"}, "string IP address"},
-        {{:opaque, 12345}, "non-binary opaque"},
-        {{:object_identifier, []}, "empty OID list"},
-        {{:object_identifier, [1]}, "too short OID list"},
-        {{:object_identifier, "invalid.oid.format"}, "invalid string OID"},
-        {{:unknown_type, "value"}, "unknown tuple type"}
+        {{:opaque, 12345}, "non-binary opaque"}
       ]
       
-      Enum.each(invalid_tuple_tests, fn {test_value, description} ->
+      Enum.each(null_conversion_tests, fn {test_value, description} ->
         varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
         pdu = PDU.build_response(1, 0, 0, varbinds)
         message = PDU.build_message(pdu, "public", :v2c)
         
-        assert_raise ArgumentError, fn ->
-          PDU.encode_message(message)
-        end
-      end)
-    end
-    
-    test "raises ArgumentError for string OIDs and exception tuples with :auto type" do
-      # Test cases that should raise ArgumentError due to new validation
-      validation_error_tests = [
-        {{:object_identifier, "1.3.6.1.2.1.1.1.0"}, "object_identifier tuple with string"},
-        {{:no_such_object, nil}, "no_such_object exception tuple"},
-        {{:no_such_instance, nil}, "no_such_instance exception tuple"},
-        {{:end_of_mib_view, nil}, "end_of_mib_view exception tuple"}
-      ]
-      
-      Enum.each(validation_error_tests, fn {test_value, description} ->
-        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
-        pdu = PDU.build_response(1, 0, 0, varbinds)
-        message = PDU.build_message(pdu, "public", :v2c)
+        {:ok, encoded} = PDU.encode_message(message)
+        {:ok, decoded} = PDU.decode_message(encoded)
         
-        case PDU.encode_message(message) do
-          {:error, {:encoding_error, %ArgumentError{}}} ->
-            # Expected behavior - validation should reject these inputs
-            :ok
-          {:ok, _encoded} ->
-            flunk("Expected ArgumentError for #{description}, but encoding succeeded")
-          {:error, other} ->
-            flunk("Expected ArgumentError for #{description}, but got: #{inspect(other)}")
-        end
+        {_oid, decoded_type, decoded_value} = hd(decoded.pdu.varbinds)
+        assert decoded_type == :null, "Invalid #{description} should become :null type"
+        assert decoded_value == :null, "Invalid #{description} should become :null value"
       end)
     end
     
@@ -229,6 +275,30 @@ defmodule SnmpLib.AutoTypeEncodingTest do
           "Boundary test #{description} failed: expected type #{inspect(type)}, got #{inspect(decoded_type)}"
         assert decoded_value == value,
           "Boundary test #{description} failed: expected value #{inspect(value)}, got #{inspect(decoded_value)}"
+      end)
+    end
+    
+    test "handles invalid OID strings gracefully with :auto type" do
+      # Test cases that should encode as :null due to invalid OID format
+      invalid_oid_tests = [
+        {{:object_identifier, "not.a.valid.oid"}, "object_identifier tuple with invalid string"}
+      ]
+      
+      Enum.each(invalid_oid_tests, fn {test_value, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :auto, test_value}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        case PDU.encode_message(message) do
+          {:ok, encoded} ->
+            # Expected behavior - invalid OID strings should encode as :null
+            {:ok, decoded} = PDU.decode_message(encoded)
+            {_oid, type, value} = hd(decoded.pdu.varbinds)
+            assert type == :null
+            assert value == :null
+          {:error, error} ->
+            flunk("Expected success with :null encoding for #{description}, but got error: #{inspect(error)}")
+        end
       end)
     end
   end

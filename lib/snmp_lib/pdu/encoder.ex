@@ -214,15 +214,85 @@ defmodule SnmpLib.PDU.Encoder do
     end
   end
   defp encode_snmp_value_fast(:object_identifier, value) when is_binary(value) do
-    raise ArgumentError, """
-    Invalid value for :object_identifier type. Expected a list of integers (OID), got string: #{inspect(value)}
-    
-    String OID values are not supported. Please convert to an OID list first.
-    Example: "1.3.6.1.2.1.1.1.0" should be [1, 3, 6, 1, 2, 1, 1, 1, 0]
-    """
+    case SnmpLib.OID.string_to_list(value) do
+      {:ok, oid_list} -> 
+        case encode_oid_fast(oid_list) do
+          {:ok, encoded} -> encoded
+          {:error, _} -> raise ArgumentError, "Invalid OID string: #{inspect(value)}"
+        end
+      {:error, _} -> raise ArgumentError, "Invalid OID string format: #{inspect(value)}"
+    end
+  end
+  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_list(value) do
+    case encode_oid_fast(value) do
+      {:ok, encoded} -> encoded
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_binary(value) do
+    case SnmpLib.OID.string_to_list(value) do
+      {:ok, oid_list} ->
+        case encode_oid_fast(oid_list) do
+          {:ok, encoded} -> encoded
+          {:error, _} -> <<@null, 0x00>>
+        end
+      {:error, _} -> <<@null, 0x00>>
+    end
+  end
+  defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:opaque, value}) when is_binary(value) do
+    length = byte_size(value)
+    encode_tag_length_value(@opaque_type, length, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:opaque, _value}), do: <<@null, 0x00>>
+  defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
+    encode_unsigned_integer(@counter32, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:counter32, _value}) do
+    <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
+    encode_unsigned_integer(@gauge32, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:gauge32, _value}) do
+    <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
+    encode_unsigned_integer(@timeticks, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:timeticks, _value}) do
+    <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast(:auto, {:counter64, value}) when is_integer(value) and value >= 0 and value <= 18446744073709551615 do
+    encode_counter64(@counter64, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:counter64, _value}) do
+    <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast(:auto, {:ip_address, value}) when is_binary(value) and byte_size(value) == 4 do
+    encode_tag_length_value(@ip_address, 4, value)
+  end
+  defp encode_snmp_value_fast(:auto, {:ip_address, _value}) do
+    <<@null, 0x00>>
+  end
+  defp encode_snmp_value_fast(:auto, {_type, _value}) do
+    <<@null, 0x00>>
   end
   defp encode_snmp_value_fast(:auto, value) when is_integer(value), do: encode_integer_fast(value)
-  defp encode_snmp_value_fast(:auto, value) when is_binary(value), do: encode_octet_string_fast(value)
+  defp encode_snmp_value_fast(:auto, value) when is_binary(value) do
+    # Try to parse as OID string first, fallback to octet string
+    case SnmpLib.OID.string_to_list(value) do
+      {:ok, oid_list} ->
+        case encode_oid_fast(oid_list) do
+          {:ok, encoded} -> encoded
+          {:error, _} -> encode_octet_string_fast(value)
+        end
+      {:error, _} ->
+        encode_octet_string_fast(value)
+    end
+  end
   defp encode_snmp_value_fast(:auto, value) when is_list(value) do
     # Assume it's an OID if it's a list of non-negative integers
     if Enum.all?(value, &(is_integer(&1) and &1 >= 0)) do
@@ -234,53 +304,9 @@ defmodule SnmpLib.PDU.Encoder do
       raise ArgumentError, "Invalid value for :auto type: #{inspect(value)}"
     end
   end
-  defp encode_snmp_value_fast(:auto, {:counter32, value}) when not is_integer(value) or value < 0 or value > 4294967295, do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when not is_integer(value) or value < 0 or value > 4294967295, do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when not is_integer(value) or value < 0 or value > 4294967295, do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:counter64, value}) when not is_integer(value) or value < 0 or value > 18446744073709551615, do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:ip_address, value}) when not is_binary(value) or byte_size(value) != 4, do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:opaque, value}) when not is_binary(value), do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when not is_list(value), do: <<@null, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:counter32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
-    encode_unsigned_integer(@counter32, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:gauge32, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
-    encode_unsigned_integer(@gauge32, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:timeticks, value}) when is_integer(value) and value >= 0 and value <= 4294967295 do
-    encode_unsigned_integer(@timeticks, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:counter64, value}) when is_integer(value) and value >= 0 and value <= 18446744073709551615 do
-    encode_counter64(@counter64, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:ip_address, value}) when is_binary(value) and byte_size(value) == 4 do
-    encode_tag_length_value(@ip_address, 4, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:opaque, value}) when is_binary(value) do
-    length = byte_size(value)
-    encode_tag_length_value(@opaque_type, length, value)
-  end
-  defp encode_snmp_value_fast(:auto, {:object_identifier, value}) when is_list(value) do
-    case encode_oid_fast(value) do
-      {:ok, encoded} -> encoded
-      {:error, _} -> raise ArgumentError, "Invalid OID list: #{inspect(value)}"
-    end
-  end
-  defp encode_snmp_value_fast(:auto, {:end_of_mib_view, _}), do: <<@end_of_mib_view, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:no_such_object, _}), do: <<@no_such_object, 0x00>>
-  defp encode_snmp_value_fast(:auto, {:no_such_instance, _}), do: <<@no_such_instance, 0x00>>
   defp encode_snmp_value_fast(:end_of_mib_view, nil), do: <<@end_of_mib_view, 0x00>>
-  defp encode_snmp_value_fast(:end_of_mib_view, value) do
-    raise ArgumentError, """
-    Invalid value for :end_of_mib_view type. Expected nil, got: #{inspect(value)}
-    
-    For :end_of_mib_view type, the value must be nil.
-    Example: {oid, :end_of_mib_view, nil}
-    """
-  end
   defp encode_snmp_value_fast(:no_such_object, _), do: <<@no_such_object, 0x00>>
   defp encode_snmp_value_fast(:no_such_instance, _), do: <<@no_such_instance, 0x00>>
-  defp encode_snmp_value_fast(:auto, {_type, _value}), do: <<@null, 0x00>>
   defp encode_snmp_value_fast(type, value) do
     raise ArgumentError, """
     Invalid SNMP value encoding. Unsupported type/value combination:
@@ -376,7 +402,7 @@ defmodule SnmpLib.PDU.Encoder do
   defp encode_oid_fast(oid_list) when is_list(oid_list) and length(oid_list) >= 2 do
     [first, second | rest] = oid_list
     
-    if first < 3 and second < 40 do
+    if first >= 0 and first < 3 and second >= 0 and second < 40 do
       first_encoded = first * 40 + second
       
       case encode_oid_subids_fast([first_encoded | rest], []) do

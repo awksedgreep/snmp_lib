@@ -138,9 +138,27 @@ defmodule SnmpLib.OidEncodingEdgeCasesTest do
           "Explicit type #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
       end)
       
+      # Test valid string OIDs that should now work
+      valid_string_tests = [
+        {"1.3.6.1.2.1.1.1.0", [1, 3, 6, 1, 2, 1, 1, 1, 0], "valid string OID"}
+      ]
+      
+      Enum.each(valid_string_tests, fn {input, expected, description} ->
+        varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :object_identifier, input}]
+        pdu = PDU.build_response(1, 0, 0, varbinds)
+        message = PDU.build_message(pdu, "public", :v2c)
+        
+        {:ok, encoded} = PDU.encode_message(message)
+        {:ok, decoded} = PDU.decode_message(encoded)
+        
+        {_oid, _type, decoded_value} = hd(decoded.pdu.varbinds)
+        
+        assert decoded_value == expected, 
+          "Valid #{description} failed: expected #{inspect(expected)}, got #{inspect(decoded_value)}"
+      end)
+      
       # Test invalid inputs that should raise ArgumentError
       invalid_tests = [
-        {"1.3.6.1.2.1.1.1.0", "string OID"},
         {[], "empty list"},
         {[1], "single element list"},
         {"", "empty string"},

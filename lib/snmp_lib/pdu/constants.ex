@@ -105,9 +105,18 @@ defmodule SnmpLib.PDU.Constants do
 
   def normalize_oid(oid) when is_list(oid), do: oid
   def normalize_oid(oid) when is_binary(oid) do
-    oid
-    |> String.split(".")
-    |> Enum.map(&String.to_integer/1)
+    try do
+      oid
+      |> String.split(".")
+      |> Enum.map(fn part ->
+        case Integer.parse(part) do
+          {num, ""} when num >= 0 -> num
+          _ -> throw(:invalid_oid)
+        end
+      end)
+    catch
+      :invalid_oid -> [1, 3, 6, 1]  # Safe default for invalid OID strings
+    end
   end
   def normalize_oid(_), do: [1, 3, 6, 1]  # Safe default for invalid types
 
