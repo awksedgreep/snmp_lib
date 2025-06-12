@@ -66,7 +66,7 @@ defmodule SnmpLib.Security.USM do
   require Logger
   
   alias SnmpLib.Security.{Auth, Priv}
-  alias SnmpLib.{PDU, Transport}
+  alias SnmpLib.PDU
   
   @type engine_id :: binary()
   @type security_name :: binary()
@@ -129,29 +129,13 @@ defmodule SnmpLib.Security.USM do
       {:ok, engine_id} = SnmpLib.Security.USM.discover_engine("10.0.0.1", port: 1161, timeout: 5000)
   """
   @spec discover_engine(binary(), keyword()) :: {:ok, engine_id()} | {:error, atom()}
-  def discover_engine(host, opts \\ []) do
+  def discover_engine(host, _opts \\ []) do
     Logger.debug("Starting engine discovery for host: #{host}")
     
-    port = Keyword.get(opts, :port, 161)
-    timeout = Keyword.get(opts, :timeout, 5000)
-    
-    # Build discovery request with empty security parameters
-    discovery_request = build_discovery_request()
-    
-    case send_discovery_request(host, port, discovery_request, timeout) do
-      {:ok, response} ->
-        case parse_discovery_response(response) do
-          {:ok, engine_id} ->
-            Logger.info("Engine discovery successful: #{Base.encode16(engine_id)}")
-            {:ok, engine_id}
-          {:error, reason} ->
-            Logger.error("Failed to parse discovery response: #{inspect(reason)}")
-            {:error, reason}
-        end
-      {:error, reason} ->
-        Logger.error("Engine discovery failed for #{host}: #{inspect(reason)}")
-        {:error, reason}
-    end
+    # SNMPv3 engine discovery is not yet implemented
+    # The current PDU encoder only supports SNMPv1/v2c messages
+    Logger.warning("SNMPv3 engine discovery not implemented - PDU encoder only supports v1/v2c")
+    {:error, :snmpv3_not_implemented}
   end
   
   @doc """
@@ -163,29 +147,13 @@ defmodule SnmpLib.Security.USM do
   """
   @spec synchronize_time(binary(), engine_id(), keyword()) :: 
     {:ok, {engine_boots(), engine_time()}} | {:error, atom()}
-  def synchronize_time(host, engine_id, opts \\ []) do
+  def synchronize_time(_host, engine_id, _opts \\ []) do
     Logger.debug("Starting time synchronization with engine: #{Base.encode16(engine_id)}")
     
-    port = Keyword.get(opts, :port, 161)
-    timeout = Keyword.get(opts, :timeout, 5000)
-    
-    # Build time synchronization request
-    sync_request = build_time_sync_request(engine_id)
-    
-    case send_time_sync_request(host, port, sync_request, timeout) do
-      {:ok, response} ->
-        case parse_time_sync_response(response) do
-          {:ok, {boots, time}} ->
-            Logger.info("Time synchronization successful: boots=#{boots}, time=#{time}")
-            {:ok, {boots, time}}
-          {:error, reason} ->
-            Logger.error("Failed to parse time sync response: #{inspect(reason)}")
-            {:error, reason}
-        end
-      {:error, reason} ->
-        Logger.error("Time synchronization failed for #{host}: #{inspect(reason)}")
-        {:error, reason}
-    end
+    # SNMPv3 time synchronization is not yet implemented
+    # The current PDU encoder only supports SNMPv1/v2c messages
+    Logger.warning("SNMPv3 time synchronization not implemented - PDU encoder only supports v1/v2c")
+    {:error, :snmpv3_not_implemented}
   end
   
   ## Message Processing
@@ -198,21 +166,13 @@ defmodule SnmpLib.Security.USM do
   """
   @spec process_outgoing_message(user_entry(), binary(), security_level()) ::
     {:ok, binary()} | {:error, atom()}
-  def process_outgoing_message(user, message, security_level) do
+  def process_outgoing_message(_user, _message, security_level) do
     Logger.debug("Processing outgoing message with security level: #{security_level}")
     
-    with {:ok, flags} <- determine_message_flags(security_level),
-         {:ok, {scoped_pdu, auth_params, priv_params}} <- apply_security(user, message, flags),
-         {:ok, security_params} <- build_security_parameters(user, auth_params, priv_params),
-         {:ok, secure_message} <- build_secure_message(scoped_pdu, security_params, flags) do
-      
-      Logger.debug("Outgoing message processing successful")
-      {:ok, secure_message}
-    else
-      {:error, reason} ->
-        Logger.error("Outgoing message processing failed: #{inspect(reason)}")
-        {:error, reason}
-    end
+    # SNMPv3 outgoing message processing is not yet implemented
+    # The current PDU encoder only supports SNMPv1/v2c messages
+    Logger.warning("SNMPv3 outgoing message processing not implemented - PDU encoder only supports v1/v2c")
+    {:error, :snmpv3_not_implemented}
   end
   
   @doc """
@@ -334,170 +294,177 @@ defmodule SnmpLib.Security.USM do
   
   ## Private Implementation
   
-  defp build_discovery_request do
-    # SNMPv3 discovery message with empty security parameters
-    %{
-      message_id: :rand.uniform(2_147_483_647),
-      max_size: 65507,
-      flags: %{auth_flag: false, priv_flag: false, reportable_flag: true},
-      security_model: 3,  # USM
-      security_parameters: %{
-        authoritative_engine_id: <<>>,
-        authoritative_engine_boots: 0,
-        authoritative_engine_time: 0,
-        user_name: <<>>,
-        authentication_parameters: <<>>,
-        privacy_parameters: <<>>
-      },
-      scoped_pdu: build_discovery_pdu()
-    }
-  end
+  # TODO: The following helper functions are for future SNMPv3 support
+  # They are commented out to avoid Dialyzer warnings until a proper
+  # SNMPv3 encoder is implemented that handles scoped_pdu and security_parameters
   
-  defp build_discovery_pdu do
-    # GET request for snmpEngineID (1.3.6.1.6.3.10.2.1.1.0)
-    engine_id_oid = [1, 3, 6, 1, 6, 3, 10, 2, 1, 1, 0]
-    PDU.build_get_request(engine_id_oid, :rand.uniform(2_147_483_647))
-  end
+  # defp build_discovery_request do
+  #   # SNMPv3 discovery message with empty security parameters
+  #   %{
+  #     message_id: :rand.uniform(2_147_483_647),
+  #     max_size: 65507,
+  #     flags: %{auth_flag: false, priv_flag: false, reportable_flag: true},
+  #     security_model: 3,  # USM
+  #     security_parameters: %{
+  #       authoritative_engine_id: <<>>,
+  #       authoritative_engine_boots: 0,
+  #       authoritative_engine_time: 0,
+  #       user_name: <<>>,
+  #       authentication_parameters: <<>>,
+  #       privacy_parameters: <<>>
+  #     },
+  #     scoped_pdu: build_discovery_pdu()
+  #   }
+  # end
   
-  defp send_discovery_request(host, port, request, timeout) do
-    # Serialize and send discovery request
-    case PDU.encode_message(request) do
-      {:ok, encoded_request} ->
-        Transport.send_request(host, port, encoded_request, timeout)
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  # defp build_discovery_pdu do
+  #   # GET request for snmpEngineID (1.3.6.1.6.3.10.2.1.1.0)
+  #   engine_id_oid = [1, 3, 6, 1, 6, 3, 10, 2, 1, 1, 0]
+  #   PDU.build_get_request(engine_id_oid, :rand.uniform(2_147_483_647))
+  # end
   
-  defp parse_discovery_response(response) do
-    case PDU.decode_message(response) do
-      {:ok, decoded} ->
-        # Check if this is an SNMPv3 message with security parameters
-        case Map.get(decoded, :security_parameters) do
-          nil ->
-            # This is likely an SNMPv1/v2c message, not v3
-            {:error, :not_snmpv3_message}
-          security_params ->
-            # Extract engine ID from security parameters
-            case Map.get(security_params, :authoritative_engine_id) do
-              nil ->
-                {:error, :missing_engine_id}
-              engine_id when is_binary(engine_id) and byte_size(engine_id) > 0 ->
-                {:ok, engine_id}
-              _ ->
-                {:error, :empty_engine_id}
-            end
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  # defp send_discovery_request(host, port, request, timeout) do
+  #   # Serialize and send discovery request
+  #   case PDU.encode_message(request) do
+  #     {:ok, encoded_request} ->
+  #       Transport.send_request(host, port, encoded_request, timeout)
+  #     {:error, reason} ->
+  #       {:error, reason}
+  #   end
+  # end
   
-  defp build_time_sync_request(engine_id) do
-    %{
-      message_id: :rand.uniform(2_147_483_647),
-      max_size: 65507,
-      flags: %{auth_flag: false, priv_flag: false, reportable_flag: true},
-      security_model: 3,
-      security_parameters: %{
-        authoritative_engine_id: engine_id,
-        authoritative_engine_boots: 0,
-        authoritative_engine_time: 0,
-        user_name: <<>>,
-        authentication_parameters: <<>>,
-        privacy_parameters: <<>>
-      },
-      scoped_pdu: build_discovery_pdu()
-    }
-  end
+  # defp parse_discovery_response(response) do
+  #   case PDU.decode_message(response) do
+  #     {:ok, decoded} ->
+  #       # Check if this is an SNMPv3 message with security parameters
+  #       case Map.get(decoded, :security_parameters) do
+  #         nil ->
+  #           # This is likely an SNMPv1/v2c message, not v3
+  #           {:error, :not_snmpv3_message}
+  #         security_params ->
+  #           # Extract engine ID from security parameters
+  #           case Map.get(security_params, :authoritative_engine_id) do
+  #             nil ->
+  #               {:error, :missing_engine_id}
+  #             engine_id when is_binary(engine_id) and byte_size(engine_id) > 0 ->
+  #               {:ok, engine_id}
+  #             _ ->
+  #               {:error, :empty_engine_id}
+  #           end
+  #       end
+  #     {:error, reason} ->
+  #       {:error, reason}
+  #   end
+  # end
   
-  defp send_time_sync_request(host, port, request, timeout) do
-    case PDU.encode_message(request) do
-      {:ok, encoded_request} ->
-        Transport.send_request(host, port, encoded_request, timeout)
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  # defp build_time_sync_request(engine_id) do
+  #   %{
+  #     message_id: :rand.uniform(2_147_483_647),
+  #     max_size: 65507,
+  #     flags: %{auth_flag: false, priv_flag: false, reportable_flag: true},
+  #     security_model: 3,
+  #     security_parameters: %{
+  #       authoritative_engine_id: engine_id,
+  #       authoritative_engine_boots: 0,
+  #       authoritative_engine_time: 0,
+  #       user_name: <<>>,
+  #       authentication_parameters: <<>>,
+  #       privacy_parameters: <<>>
+  #     },
+  #     scoped_pdu: build_discovery_pdu()
+  #   }
+  # end
   
-  defp parse_time_sync_response(response) do
-    case PDU.decode_message(response) do
-      {:ok, decoded} ->
-        # Check if this is an SNMPv3 message with security parameters
-        case Map.get(decoded, :security_parameters) do
-          nil ->
-            # This is likely an SNMPv1/v2c message, not v3
-            {:error, :not_snmpv3_message}
-          security_params ->
-            boots = Map.get(security_params, :authoritative_engine_boots, 0)
-            time = Map.get(security_params, :authoritative_engine_time, 0)
-            {:ok, {boots, time}}
-        end
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  # defp send_time_sync_request(host, port, request, timeout) do
+  #   case PDU.encode_message(request) do
+  #     {:ok, encoded_request} ->
+  #       Transport.send_request(host, port, encoded_request, timeout)
+  #     {:error, reason} ->
+  #       {:error, reason}
+  #   end
+  # end
   
-  defp determine_message_flags(:no_auth_no_priv) do
-    {:ok, %{auth_flag: false, priv_flag: false, reportable_flag: false}}
-  end
-  defp determine_message_flags(:auth_no_priv) do
-    {:ok, %{auth_flag: true, priv_flag: false, reportable_flag: false}}
-  end
-  defp determine_message_flags(:auth_priv) do
-    {:ok, %{auth_flag: true, priv_flag: true, reportable_flag: false}}
-  end
-  defp determine_message_flags(_) do
-    {:error, :invalid_security_level}
-  end
+  # defp parse_time_sync_response(response) do
+  #   case PDU.decode_message(response) do
+  #     {:ok, decoded} ->
+  #       # Check if this is an SNMPv3 message with required fields
+  #       case Map.get(decoded, :security_parameters) do
+  #         nil ->
+  #           # This is likely an SNMPv1/v2c message, not v3
+  #           {:error, :not_snmpv3_message}
+  #         security_params ->
+  #           boots = Map.get(security_params, :authoritative_engine_boots, 0)
+  #           time = Map.get(security_params, :authoritative_engine_time, 0)
+  #           {:ok, {boots, time}}
+  #       end
+  #     {:error, reason} ->
+  #       {:error, reason}
+  #   end
+  # end
   
-  defp apply_security(user, message, flags) do
-    with {:ok, encrypted_message, priv_params} <- maybe_encrypt(user, message, flags.priv_flag),
-         {:ok, auth_params} <- maybe_authenticate(user, encrypted_message, flags.auth_flag) do
-      {:ok, {encrypted_message, auth_params, priv_params}}
-    end
-  end
+  # TODO: Additional SNMPv3 helper functions - commented out until proper v3 support is implemented
   
-  defp maybe_encrypt(user, message, true) do
-    case Priv.encrypt(user.priv_protocol, user.priv_key, user.auth_key, message) do
-      {:ok, {encrypted, params}} -> {:ok, encrypted, params}
-      {:error, reason} -> {:error, reason}
-    end
-  end
-  defp maybe_encrypt(_user, message, false) do
-    {:ok, message, <<>>}
-  end
+  # defp determine_message_flags(:no_auth_no_priv) do
+  #   {:ok, %{auth_flag: false, priv_flag: false, reportable_flag: false}}
+  # end
+  # defp determine_message_flags(:auth_no_priv) do
+  #   {:ok, %{auth_flag: true, priv_flag: false, reportable_flag: false}}
+  # end
+  # defp determine_message_flags(:auth_priv) do
+  #   {:ok, %{auth_flag: true, priv_flag: true, reportable_flag: false}}
+  # end
+  # defp determine_message_flags(_) do
+  #   {:error, :invalid_security_level}
+  # end
   
-  defp maybe_authenticate(user, message, true) do
-    Auth.authenticate(user.auth_protocol, user.auth_key, message)
-  end
-  defp maybe_authenticate(_user, _message, false) do
-    {:ok, <<>>}
-  end
+  # defp apply_security(user, message, flags) do
+  #   with {:ok, encrypted_message, priv_params} <- maybe_encrypt(user, message, flags.priv_flag),
+  #        {:ok, auth_params} <- maybe_authenticate(user, encrypted_message, flags.auth_flag) do
+  #     {:ok, {encrypted_message, auth_params, priv_params}}
+  #   end
+  # end
   
-  defp build_security_parameters(user, auth_params, priv_params) do
-    params = %{
-      authoritative_engine_id: user.engine_id,
-      authoritative_engine_boots: 1,  # This should come from persistent storage
-      authoritative_engine_time: System.system_time(:second),
-      user_name: user.security_name,
-      authentication_parameters: auth_params,
-      privacy_parameters: priv_params
-    }
-    {:ok, params}
-  end
+  # defp maybe_encrypt(user, message, true) do
+  #   case Priv.encrypt(user.priv_protocol, user.priv_key, user.auth_key, message) do
+  #     {:ok, {encrypted, params}} -> {:ok, encrypted, params}
+  #     {:error, reason} -> {:error, reason}
+  #   end
+  # end
+  # defp maybe_encrypt(_user, message, false) do
+  #   {:ok, message, <<>>}
+  # end
   
-  defp build_secure_message(scoped_pdu, security_params, flags) do
-    message = %{
-      message_id: :rand.uniform(2_147_483_647),
-      max_size: 65507,
-      flags: flags,
-      security_model: 3,
-      security_parameters: security_params,
-      scoped_pdu: scoped_pdu
-    }
-    PDU.encode_message(message)
-  end
+  # defp maybe_authenticate(user, message, true) do
+  #   Auth.authenticate(user.auth_protocol, user.auth_key, message)
+  # end
+  # defp maybe_authenticate(_user, _message, false) do
+  #   {:ok, <<>>}
+  # end
+  
+  # defp build_security_parameters(user, auth_params, priv_params) do
+  #   params = %{
+  #     authoritative_engine_id: user.engine_id,
+  #     authoritative_engine_boots: 1,  # This should come from persistent storage
+  #     authoritative_engine_time: System.system_time(:second),
+  #     user_name: user.security_name,
+  #     authentication_parameters: auth_params,
+  #     privacy_parameters: priv_params
+  #   }
+  #   {:ok, params}
+  # end
+  
+  # TODO: SNMPv3 message building - commented out until proper v3 encoder is implemented
+  # defp build_secure_message(scoped_pdu, security_params, flags) do
+  #   message = %{
+  #     message_id: :rand.uniform(2_147_483_647),
+  #     max_size: 65507,
+  #     flags: flags,
+  #     security_model: 3,
+  #     security_parameters: security_params,
+  #     scoped_pdu: scoped_pdu
+  #   }
+  #   PDU.encode_message(message)
+  # end
   
   defp parse_secure_message(secure_message) do
     case PDU.decode_message(secure_message) do
