@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2025-06-12
+
+### Fixed
+
+- **CRITICAL: Fixed Return Format Inconsistencies Throughout Project**
+  - Fixed Walker module expecting incorrect 2-tuple format from `get_next/3` (would cause crashes)
+  - Updated Walker to properly handle `{:ok, {next_oid, type, value}}` format and preserve type information
+  - Fixed CHANGELOG documentation showing incorrect `{:ok, {next_oid, value}}` format
+  - Fixed test documentation reflecting wrong expected return formats
+  - Removed obsolete bug report file with outdated return format examples
+  - Removed problematic test file calling private Manager functions
+  - **All Manager API functions now consistently preserve SNMP type information**
+
+### Verified
+
+- **776 tests, 0 failures** - All functionality verified working
+- **Walker module no longer crashes** when using `get_next/3`
+- **100% consistent return formats** across all Manager API functions
+- **Type information preserved** throughout the entire SNMP operation chain
+
 ## [1.0.5] - 2025-06-08
 
 ### Added
@@ -77,7 +97,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Automatic version detection and appropriate protocol selection
   - Consistent API following existing `get/3` and `get_bulk/3` patterns
   - Proper error handling for network errors and SNMP exceptions
-  - Returns `{:ok, {next_oid, value}}` tuple format as specified
+  - Returns `{:ok, {next_oid, type, value}}` tuple format as specified
   - Comprehensive test coverage with 10 test cases
   - Enables proper MIB walking operations for all SNMP versions
   - Allows higher-level libraries like `snmp_mgr` to remove version-forcing workarounds

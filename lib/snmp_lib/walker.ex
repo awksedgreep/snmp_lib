@@ -383,10 +383,10 @@ defmodule SnmpLib.Walker do
   
   defp sequential_walk_loop(state) do
     case SnmpLib.Manager.get_next(state.host, state.current_oid, state.opts) do
-      {:ok, {next_oid, value}} ->
+      {:ok, {next_oid, type, value}} ->
         # Check if we're still in the table
         if oid_in_table?(next_oid, state.table_prefix) do
-          varbind = {next_oid, :auto, value}
+          varbind = {next_oid, type, value}
           new_state = %{state | 
             current_oid: next_oid,
             accumulated: [varbind | state.accumulated],
@@ -417,10 +417,10 @@ defmodule SnmpLib.Walker do
   
   defp sequential_walk_subtree_loop(state) do
     case SnmpLib.Manager.get_next(state.host, state.current_oid, state.opts) do
-      {:ok, {next_oid, value}} ->
+      {:ok, {next_oid, type, value}} ->
         # Check if we're still in the subtree
         if oid_in_subtree?(next_oid, state.subtree_prefix) do
-          varbind = {next_oid, :auto, value}
+          varbind = {next_oid, type, value}
           new_state = %{state | 
             current_oid: next_oid,
             accumulated: [varbind | state.accumulated],

@@ -592,7 +592,7 @@ defmodule SnmpLib.ManagerTest do
       assert {:error, _} = Manager.get_next("invalid.host.test", [1, 3, 6, 1], port: 1161, timeout: 100)
     end
     
-    test "expected return format is {:ok, {next_oid, value}} tuple" do
+    test "expected return format is {:ok, {next_oid, type, value}} tuple" do
       # While we can't test successful responses without a real SNMP device,
       # we can verify the function signature and error return format
       result = Manager.get_next("invalid.host.test", [1, 3, 6, 1, 2, 1, 1, 1, 0], timeout: 100)
@@ -600,7 +600,7 @@ defmodule SnmpLib.ManagerTest do
       # Should return error tuple (since host is invalid)
       assert {:error, _reason} = result
       
-      # The successful format would be {:ok, {next_oid, value}}
+      # The successful format would be {:ok, {next_oid, type, value}}
       # This is documented in the function spec and examples
     end
     

@@ -18,10 +18,10 @@ defmodule SnmpLib.Manager do
   ## Quick Start
   
       # Simple GET operation
-      {:ok, value} = SnmpLib.Manager.get("192.168.1.1", [1, 3, 6, 1, 2, 1, 1, 1, 0])
+      {:ok, {type, value}} = SnmpLib.Manager.get("192.168.1.1", [1, 3, 6, 1, 2, 1, 1, 1, 0])
       
       # GET with custom community and timeout
-      {:ok, value} = SnmpLib.Manager.get("192.168.1.1", "1.3.6.1.2.1.1.1.0", 
+      {:ok, {type, value}} = SnmpLib.Manager.get("192.168.1.1", "1.3.6.1.2.1.1.1.0", 
                                          community: "private", timeout: 10_000)
       
       # Bulk operations for efficiency
@@ -95,24 +95,24 @@ defmodule SnmpLib.Manager do
   
   ## Returns
   
-  - `{:ok, value}`: Successfully retrieved the value
+  - `{:ok, {type, value}}`: Successfully retrieved the value with its SNMP type
   - `{:error, reason}`: Operation failed with reason
   
   ## Examples
   
       # Basic GET operation (would succeed with real device)
       # SnmpLib.Manager.get("192.168.1.1", [1, 3, 6, 1, 2, 1, 1, 1, 0])
-      # {:ok, "Cisco IOS Software"}
+      # {:ok, {:octet_string, "Cisco IOS Software"}}
       
-      # GET with custom community (would succeed with real device)
-      # SnmpLib.Manager.get("192.168.1.1", "1.3.6.1.2.1.1.1.0", community: "private")
-      # {:ok, "Private System Description"}
+      # GET with custom community and timeout (would succeed with real device)
+      # SnmpLib.Manager.get("192.168.1.1", "1.3.6.1.2.1.1.1.0", community: "private", timeout: 10_000)
+      # {:ok, {:octet_string, "Private System Description"}}
       
       # Test that function exists and handles invalid input properly
       iex> match?({:error, _}, SnmpLib.Manager.get("invalid.host", [1, 3, 6, 1, 2, 1, 1, 3, 0], timeout: 100))
       true
   """
-  @spec get(host(), oid(), manager_opts()) :: operation_result()
+  @spec get(host(), oid(), manager_opts()) :: {:ok, {atom(), any()}} | {:error, atom() | {atom(), any()}}
   def get(host, oid, opts \\ []) do
     opts = merge_default_opts(opts)
     normalized_oid = normalize_oid(oid)
@@ -162,22 +162,22 @@ defmodule SnmpLib.Manager do
   
   ## Returns
   
-  - `{:ok, {next_oid, value}}`: Next OID and its value as a tuple
+  - `{:ok, {next_oid, type, value}}`: Next OID and its value as a tuple
   - `{:error, reason}`: Operation failed with reason
   
   ## Examples
   
       # Get next OID after system description
-      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0")
+      {:ok, {next_oid, type, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0")
       
       # SNMP v1 compatibility
-      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", version: :v1)
+      {:ok, {next_oid, type, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", version: :v1)
       
       # With custom community
-      {:ok, {next_oid, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", 
+      {:ok, {next_oid, type, value}} = SnmpLib.Manager.get_next("192.168.1.1", "1.3.6.1.2.1.1.1.0", 
                                                            community: "private", timeout: 10_000)
   """
-  @spec get_next(host(), oid(), manager_opts()) :: {:ok, {oid(), snmp_value()}} | {:error, atom() | {atom(), any()}}
+  @spec get_next(host(), oid(), manager_opts()) :: {:ok, {oid(), atom(), any()}} | {:error, atom() | {atom(), any()}}
   def get_next(host, oid, opts \\ []) do
     opts = merge_default_opts(opts)
     normalized_oid = normalize_oid(oid)
@@ -213,7 +213,7 @@ defmodule SnmpLib.Manager do
   
   ## Returns
   
-  - `{:ok, varbinds}`: List of {oid, value} tuples
+  - `{:ok, varbinds}`: List of {oid, type, value} tuples
   - `{:error, reason}`: Operation failed with reason
   
   ## Examples
@@ -303,7 +303,7 @@ defmodule SnmpLib.Manager do
   
   ## Returns
   
-  - `{:ok, results}`: List of {oid, value} or {oid, {:error, reason}} tuples
+  - `{:ok, results}`: List of {oid, type, value} or {oid, {:error, reason}} tuples
   - `{:error, reason}`: Connection or overall operation failed
   
   ## Examples
@@ -313,7 +313,7 @@ defmodule SnmpLib.Manager do
       iex> match?({:error, _}, SnmpLib.Manager.get_multi("invalid.host", oids, timeout: 100))
       true
   """
-  @spec get_multi(host(), [oid()], manager_opts()) :: {:ok, [{oid(), snmp_value() | {:error, any()}}]} | {:error, any()}
+  @spec get_multi(host(), [oid()], manager_opts()) :: {:ok, [{oid(), atom(), any() | {:error, any()}}]} | {:error, any()}
   def get_multi(host, oids, opts \\ []) when is_list(oids) do
     # Validate input parameters
     case oids do
@@ -539,8 +539,8 @@ defmodule SnmpLib.Manager do
     Enum.map(oids, fn oid ->
       case perform_get_operation(socket, host, oid, opts) do
         {:ok, response} ->
-          case extract_get_result(response) do
-            {:ok, value} -> {oid, value}
+          case extract_get_result_with_oid(response) do
+            {:ok, {oid, type, value}} -> {oid, type, value}
             {:error, reason} -> {oid, {:error, reason}}
           end
         {:error, reason} ->
@@ -555,9 +555,9 @@ defmodule SnmpLib.Manager do
     Logger.debug("Full response PDU: #{inspect(response.pdu)}")
     {:error, decode_error_status(error_status)}
   end
-  defp extract_get_result(%{pdu: %{varbinds: [{_oid, type, value}]}} = response) do
+  defp extract_get_result(%{pdu: %{varbinds: [{oid, type, value}]}} = response) do
     Logger.debug("Extracting successful result - PDU: #{inspect(response.pdu)}")
-    Logger.debug("Varbind details - type: #{inspect(type)}, value: #{inspect(value)}")
+    Logger.debug("Varbind details - oid: #{inspect(oid)}, type: #{inspect(type)}, value: #{inspect(value)}")
     
     # Check for SNMPv2c exception values in both type and value fields
     case {type, value} do
@@ -583,13 +583,57 @@ defmodule SnmpLib.Manager do
         Logger.debug("Found exception in value field: end_of_mib_view")
         {:error, :end_of_mib_view}
       
-      # Normal value
+      # Normal value - return type and value (OID is known from input)
       _ -> 
-        Logger.debug("Returning successful value: #{inspect(value)}")
-        {:ok, value}
+        Logger.debug("Returning successful value with type: #{inspect({type, value})}")
+        {:ok, {type, value}}
     end
   end
   defp extract_get_result(response) do
+    Logger.error("Invalid response format: #{inspect(response)}")
+    {:error, :invalid_response}
+  end
+  
+  defp extract_get_result_with_oid(%{pdu: %{error_status: error_status}} = response) when error_status != 0 do
+    Logger.debug("Extracting error result - error_status: #{error_status}")
+    Logger.debug("Full response PDU: #{inspect(response.pdu)}")
+    {:error, decode_error_status(error_status)}
+  end
+  defp extract_get_result_with_oid(%{pdu: %{varbinds: [{oid, type, value}]}} = response) do
+    Logger.debug("Extracting successful result - PDU: #{inspect(response.pdu)}")
+    Logger.debug("Varbind details - oid: #{inspect(oid)}, type: #{inspect(type)}, value: #{inspect(value)}")
+    
+    # Check for SNMPv2c exception values in both type and value fields
+    case {type, value} do
+      # Exception values in type field (from simulator)
+      {:no_such_object, _} -> 
+        Logger.debug("Found exception in type field: no_such_object")
+        {:error, :no_such_object}
+      {:no_such_instance, _} -> 
+        Logger.debug("Found exception in type field: no_such_instance")
+        {:error, :no_such_instance}
+      {:end_of_mib_view, _} -> 
+        Logger.debug("Found exception in type field: end_of_mib_view")
+        {:error, :end_of_mib_view}
+      
+      # Exception values in value field (standard format)
+      {_, {:no_such_object, _}} -> 
+        Logger.debug("Found exception in value field: no_such_object")
+        {:error, :no_such_object}
+      {_, {:no_such_instance, _}} -> 
+        Logger.debug("Found exception in value field: no_such_instance")
+        {:error, :no_such_instance}
+      {_, {:end_of_mib_view, _}} -> 
+        Logger.debug("Found exception in value field: end_of_mib_view")
+        {:error, :end_of_mib_view}
+      
+      # Normal value - return full 3-tuple for multi operations
+      _ -> 
+        Logger.debug("Returning successful varbind with type: #{inspect({oid, type, value})}")
+        {:ok, {oid, type, value}}
+    end
+  end
+  defp extract_get_result_with_oid(response) do
     Logger.error("Invalid response format: #{inspect(response)}")
     {:error, :invalid_response}
   end
@@ -613,8 +657,8 @@ defmodule SnmpLib.Manager do
       end
     end)
     
-    results = Enum.map(valid_varbinds, fn {oid, _type, value} -> {oid, value} end)
-    {:ok, results}
+    # Return documented 3-tuple varbind format {oid, type, value}
+    {:ok, valid_varbinds}
   end
   defp extract_bulk_result(%{pdu: %{error_status: error_status}}) when error_status != 0 do
     {:error, decode_error_status(error_status)}
@@ -660,16 +704,16 @@ defmodule SnmpLib.Manager do
     bulk_opts = Keyword.merge(opts, [max_repetitions: 1, non_repeaters: 0])
     
     case get_bulk(host, oid, bulk_opts) do
-      {:ok, [{next_oid, value}]} -> 
-        Logger.debug("GETNEXT v2c+ via GETBULK successful: #{inspect({next_oid, value})}")
-        {:ok, {next_oid, value}}
+      {:ok, [{next_oid, type, value}]} -> 
+        Logger.debug("GETNEXT v2c+ via GETBULK successful: #{inspect({next_oid, type, value})}")
+        {:ok, {next_oid, type, value}}
       {:ok, []} -> 
         Logger.debug("GETNEXT v2c+ reached end of MIB")
         {:error, :end_of_mib_view}
       {:ok, results} when is_list(results) ->
         # Take the first result if multiple returned
         case List.first(results) do
-          {next_oid, value} -> {:ok, {next_oid, value}}
+          {next_oid, type, value} -> {:ok, {next_oid, type, value}}
           _ -> {:error, :invalid_response}
         end
       {:error, reason} = error -> 
@@ -714,8 +758,8 @@ defmodule SnmpLib.Manager do
       
       # Normal value - return both next OID and value
       _ -> 
-        Logger.debug("Returning successful GETNEXT result: #{inspect({next_oid, value})}")
-        {:ok, {next_oid, value}}
+        Logger.debug("Returning successful GETNEXT result: #{inspect({next_oid, type, value})}")
+        {:ok, {next_oid, type, value}}
     end
   end
   
