@@ -266,15 +266,14 @@ defmodule SnmpLib.PDU do
 
   ## Examples
 
-      iex> request_pdu = %{type: :get_request, request_id: 123, error_status: 0, error_index: 0, varbinds: []}
       iex> varbinds = [{[1, 3, 6, 1, 2, 1, 1, 1, 0], :octet_string, "Linux server"}]
-      iex> {:ok, pdu} = SnmpLib.PDU.build_response(request_pdu, varbinds)
+      iex> pdu = SnmpLib.PDU.build_response(123, 0, 0, varbinds)
       iex> pdu.type
       :get_response
   """
-  @spec build_response(pdu(), [varbind()], error_status(), non_neg_integer()) :: pdu()
-  def build_response(request_pdu, varbinds, error_status \\ 0, error_index \\ 0) do
-    Builder.build_response(request_pdu.request_id, error_status, error_index, varbinds)
+  @spec build_response(non_neg_integer(), error_status(), non_neg_integer(), [varbind()]) :: pdu()
+  def build_response(request_id, error_status, error_index, varbinds \\ []) do
+    Builder.build_response(request_id, error_status, error_index, varbinds)
   end
 
   @doc """
