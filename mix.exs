@@ -4,7 +4,7 @@ defmodule SnmpLib.MixProject do
   def project do
     [
       app: :snmp_lib,
-      version: "1.0.6",
+      version: "1.0.7",
       elixir: "~> 1.15",
       start_permanent: Mix.env() == :prod,
       compilers: [:yecc] ++ Mix.compilers(),

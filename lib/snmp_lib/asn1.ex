@@ -126,13 +126,9 @@ defmodule SnmpLib.ASN1 do
   """
   @spec encode_integer(integer()) :: {:ok, binary()} | {:error, atom()}
   def encode_integer(value) when is_integer(value) do
-    try do
-      content = encode_integer_content(value)
-      tlv_bytes = encode_tlv(@tag_integer, content)
-      {:ok, tlv_bytes}
-    rescue
-      _ -> {:error, :encoding_failed}
-    end
+    content = encode_integer_content(value)
+    tlv_bytes = encode_tlv(@tag_integer, content)
+    {:ok, tlv_bytes}
   end
 
   @doc """
@@ -149,12 +145,8 @@ defmodule SnmpLib.ASN1 do
   """
   @spec encode_octet_string(binary()) :: {:ok, binary()} | {:error, atom()}
   def encode_octet_string(value) when is_binary(value) do
-    try do
-      tlv_bytes = encode_tlv(@tag_octet_string, value)
-      {:ok, tlv_bytes}
-    rescue
-      _ -> {:error, :encoding_failed}
-    end
+    tlv_bytes = encode_tlv(@tag_octet_string, value)
+    {:ok, tlv_bytes}
   end
 
   @doc """
@@ -215,14 +207,12 @@ defmodule SnmpLib.ASN1 do
   """
   @spec encode_oid(oid()) :: {:ok, binary()} | {:error, atom()}
   def encode_oid(oid_list) when is_list(oid_list) and length(oid_list) >= 2 do
-    try do
-      content = encode_oid_content(oid_list)
-      tlv_bytes = encode_tlv(@tag_oid, content)
-      {:ok, tlv_bytes}
-    rescue
-      _ -> {:error, :encoding_failed}
-    catch
-      :error -> {:error, :invalid_oid}
+    case encode_oid_content(oid_list) do
+      {:ok, content} ->
+        tlv_bytes = encode_tlv(@tag_oid, content)
+        {:ok, tlv_bytes}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
   def encode_oid(_), do: {:error, :invalid_oid}
@@ -542,14 +532,7 @@ defmodule SnmpLib.ASN1 do
   """
   @spec validate_ber_structure(binary()) :: :ok | {:error, atom()}
   def validate_ber_structure(data) when is_binary(data) do
-    try do
-      validate_ber_recursive(data)
-    rescue
-      _ -> {:error, :validation_failed}
-    catch
-      :invalid_structure -> {:error, :invalid_structure}
-      :insufficient_data -> {:error, :insufficient_data}
-    end
+    validate_ber_recursive(data)
   end
 
   @doc """
@@ -663,9 +646,10 @@ defmodule SnmpLib.ASN1 do
     first_byte = first * 40 + second
     first_encoded = encode_oid_subidentifier(first_byte)
     rest_encoded = Enum.map(rest, &encode_oid_subidentifier/1)
-    :binary.list_to_bin([first_encoded | rest_encoded])
+    content = :binary.list_to_bin([first_encoded | rest_encoded])
+    {:ok, content}
   end
-  defp encode_oid_content(_), do: throw(:error)
+  defp encode_oid_content(_), do: {:error, :invalid_oid}
 
   defp encode_oid_subidentifier(value) when value < 128 do
     <<value>>
@@ -757,8 +741,8 @@ defmodule SnmpLib.ASN1 do
     case decode_tlv(data) do
       {:ok, {_tag, _content, remaining}} ->
         validate_ber_recursive(remaining)
-      {:error, _} ->
-        throw(:invalid_structure)
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 end

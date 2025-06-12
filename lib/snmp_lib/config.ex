@@ -427,20 +427,9 @@ defmodule SnmpLib.Config do
   
   @impl GenServer
   def handle_call(:reload, _from, state) do
-    try do
-      # Reload from environment and files
-      new_config = load_initial_config(state.environment, [config_file: state.config_file])
-      store_config(new_config)
-      
-      # Notify all watchers
-      Enum.each([:snmp, :pool, :monitoring, :error_handling, :cache], fn section ->
-        notify_watchers(section)
-      end)
-      
-      {:reply, :ok, state}
-    rescue
-      error ->
-        {:reply, {:error, error}, state}
+    case reload_configuration(state) do
+      {:ok, new_state} -> {:reply, :ok, new_state}
+      {:error, error} -> {:reply, {:error, error}, state}
     end
   end
   
@@ -583,35 +572,44 @@ defmodule SnmpLib.Config do
   
   # Update configuration value in ETS
   defp update_config_value(section, key, value) do
-    try do
-      case :ets.lookup(@config_table, section) do
-        [{^section, config}] ->
-          updated_config = put_nested_value(config, key, value)
-          :ets.insert(@config_table, {section, updated_config})
-          :ok
-        [] ->
-          # Create new section
-          new_config = put_nested_value(%{}, key, value)
-          :ets.insert(@config_table, {section, new_config})
-          :ok
-      end
-    rescue
-      FunctionClauseError ->
-        {:error, :invalid_key_format}
-      ArgumentError ->
-        {:error, :invalid_config_path}
-      error ->
-        {:error, {:unexpected_error, error}}
+    case :ets.lookup(@config_table, section) do
+      [{^section, config}] ->
+        case put_nested_value_safe(config, key, value) do
+          {:ok, updated_config} ->
+            :ets.insert(@config_table, {section, updated_config})
+            :ok
+          {:error, reason} ->
+            {:error, reason}
+        end
+      [] ->
+        # Create new section
+        case put_nested_value_safe(%{}, key, value) do
+          {:ok, new_config} ->
+            :ets.insert(@config_table, {section, new_config})
+            :ok
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
+  rescue
+    ArgumentError ->
+      {:error, :invalid_config_path}
+    error ->
+      {:error, {:unexpected_error, error}}
   end
   
   # Set nested configuration value
-  defp put_nested_value(config, key, value) when is_atom(key) do
-    Map.put(config, key, value)
+  defp put_nested_value_safe(config, key, value) when is_atom(key) do
+    {:ok, Map.put(config, key, value)}
   end
   
-  defp put_nested_value(config, keys, value) when is_list(keys) do
-    put_in(config, keys, value)
+  defp put_nested_value_safe(config, keys, value) when is_list(keys) do
+    try do
+      {:ok, put_in(config, keys, value)}
+    rescue
+      error ->
+        {:error, {:unexpected_error, error}}
+    end
   end
   
   # Get all configuration as map
@@ -675,6 +673,24 @@ defmodule SnmpLib.Config do
               Logger.warning("Configuration watcher failed: #{inspect(error)}")
           end
         end)
+    end
+  end
+  
+  defp reload_configuration(state) do
+    try do
+      # Reload from environment and files
+      new_config = load_initial_config(state.environment, [config_file: state.config_file])
+      store_config(new_config)
+      
+      # Notify all watchers
+      Enum.each([:snmp, :pool, :monitoring, :error_handling, :cache], fn section ->
+        notify_watchers(section)
+      end)
+      
+      {:ok, state}
+    rescue
+      error ->
+        {:error, error}
     end
   end
 end

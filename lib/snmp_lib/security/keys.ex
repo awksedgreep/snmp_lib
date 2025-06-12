@@ -165,13 +165,17 @@ defmodule SnmpLib.Security.Keys do
     
     try do
       keys = for protocol <- protocols, into: %{} do
-        {:ok, key} = derive_auth_key(protocol, password, engine_id)
-        {protocol, key}
+        case derive_auth_key(protocol, password, engine_id) do
+          {:ok, key} -> {protocol, key}
+          {:error, reason} -> throw({:error, reason})
+        end
       end
       {:ok, keys}
     rescue
       _error ->
         {:error, :multi_key_derivation_failed}
+    catch
+      {:error, reason} -> {:error, reason}
     end
   end
   

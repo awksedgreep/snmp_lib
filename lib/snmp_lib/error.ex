@@ -394,20 +394,21 @@ defmodule SnmpLib.Error do
   @spec create_error_response(map(), error_status(), error_index()) ::
     {:ok, map()} | {:error, atom()}
   def create_error_response(request_pdu, error_status, error_index) do
-    try do
-      error_code_num = if is_integer(error_status), do: error_status, else: error_code(error_status)
-      
-      error_response = %{
-        type: :get_response,
-        request_id: Map.get(request_pdu, :request_id, 0),
-        error_status: error_code_num,
-        error_index: error_index,
-        varbinds: Map.get(request_pdu, :varbinds, [])
-      }
-      
-      {:ok, error_response}
-    rescue
-      _error -> {:error, :invalid_request_pdu}
+    case validate_request_pdu(request_pdu) do
+      :ok ->
+        error_code_num = if is_integer(error_status), do: error_status, else: error_code(error_status)
+        
+        error_response = %{
+          type: :get_response,
+          request_id: Map.get(request_pdu, :request_id, 0),
+          error_status: error_code_num,
+          error_index: error_index,
+          varbinds: Map.get(request_pdu, :varbinds, [])
+        }
+        
+        {:ok, error_response}
+      {:error, reason} ->
+        {:error, reason}
     end
   end
   
@@ -501,6 +502,11 @@ defmodule SnmpLib.Error do
   end
   
   ## Private Helper Functions
+  
+  defp validate_request_pdu(request_pdu) when is_map(request_pdu) do
+    :ok
+  end
+  defp validate_request_pdu(_), do: {:error, :invalid_request_pdu}
   
   defp get_error_varbind(varbinds, error_index) when is_list(varbinds) do
     # SNMP error_index is 1-based

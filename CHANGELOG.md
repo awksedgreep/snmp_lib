@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.7] - 2025-06-12
+
+### Improved
+
+- **MAJOR: Refactored Error Handling to Idiomatic Elixir Patterns**
+  - Removed excessive try/rescue blocks throughout the codebase ("java in my elixir code")
+  - Replaced 12 try/rescue blocks with `{:ok, result} | {:error, reason}` patterns
+  - Enhanced error handling in ASN.1, OID, Config, and Error modules
+  - Improved error messages with specific error reasons instead of generic failures
+  - Added helper functions for safer error propagation and validation
+  - Preserved justified try/rescue usage for external libraries, resource cleanup, and crypto operations
+  - All 776 tests passing with zero regressions and full backward compatibility
+
+### Technical Details
+
+- **ASN.1 Module**: Removed 4 try/rescue blocks, improved encoding/decoding error handling
+- **OID Module**: Removed 4 try/rescue blocks, enhanced string parsing and table index operations
+- **Config Module**: Removed 2 try/rescue blocks, improved configuration loading and validation
+- **Error Module**: Removed 1 try/rescue block, added proper PDU validation
+- **Transport/Security**: Analyzed and preserved justified try/rescue for network and crypto operations
+- **Code Quality**: Better error propagation, cleaner control flow, enhanced maintainability
+
 ## [1.0.6] - 2025-06-12
 
 ### Fixed

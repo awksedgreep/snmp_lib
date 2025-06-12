@@ -491,14 +491,13 @@ defmodule SnmpLib.Transport do
   @spec get_socket_stats(socket()) :: {:ok, map()} | {:error, atom()}
   def get_socket_stats(socket) do
     try do
-      stats = %{
-        socket_info: :inet.info(socket),
-        port_info: :erlang.port_info(socket),
-        statistics: :inet.getstat(socket)
-      }
-      {:ok, stats}
+      case collect_socket_stats(socket) do
+        {:ok, stats} -> {:ok, stats}
+        {:error, reason} -> {:error, reason}
+      end
     rescue
-      _ -> {:error, :stats_unavailable}
+      error ->
+        {:error, {:stats_error, error}}
     end
   end
 
@@ -580,6 +579,19 @@ defmodule SnmpLib.Transport do
         {:error, reason} ->
           {:error, reason}
       end
+    end
+  end
+
+  defp collect_socket_stats(socket) do
+    try do
+      stats = %{
+        socket_info: :inet.info(socket),
+        port_info: :erlang.port_info(socket),
+        statistics: :inet.getstat(socket)
+      }
+      {:ok, stats}
+    rescue
+      _ -> {:error, :stats_unavailable}
     end
   end
 end

@@ -88,18 +88,15 @@ defmodule SnmpLib.OID do
         {:error, :empty_oid}
       
       trimmed_string ->
-        try do
-          parts = String.split(trimmed_string, ".")
-          oid_list = Enum.map(parts, &parse_oid_component/1)
-          
-          case validate_oid_list(oid_list) do
-            :ok -> {:ok, oid_list}
-            {:error, reason} -> {:error, reason}
-          end
-        rescue
-          _ -> {:error, :invalid_oid_string}
-        catch
-          :invalid_component -> {:error, :invalid_oid_string}
+        parts = String.split(trimmed_string, ".")
+        case parse_oid_components(parts) do
+          {:ok, oid_list} ->
+            case validate_oid_list(oid_list) do
+              :ok -> {:ok, oid_list}
+              {:error, reason} -> {:error, reason}
+            end
+          {:error, reason} ->
+            {:error, reason}
         end
     end
   end
@@ -402,29 +399,23 @@ defmodule SnmpLib.OID do
   end
   
   def parse_table_index(index, {:string, length}) when is_list(index) and length(index) == length do
-    try do
-      string = index |> Enum.map(&<<&1>>) |> Enum.join("")
-      {:ok, string}
-    rescue
-      _ -> {:error, :invalid_string_index}
+    case build_string_from_bytes(index) do
+      {:ok, string} -> {:ok, string}
+      {:error, reason} -> {:error, reason}
     end
   end
   
   def parse_table_index([length | rest], {:variable_string}) when length(rest) == length do
-    try do
-      string = rest |> Enum.map(&<<&1>>) |> Enum.join("")
-      {:ok, string}
-    rescue
-      _ -> {:error, :invalid_string_index}
+    case build_string_from_bytes(rest) do
+      {:ok, string} -> {:ok, string}
+      {:error, reason} -> {:error, reason}
     end
   end
   
   def parse_table_index(index, syntax_list) when is_list(syntax_list) do
-    try do
-      {parsed, _remaining} = parse_index_components(index, syntax_list, [])
-      {:ok, parsed}
-    rescue
-      _ -> {:error, :invalid_compound_index}
+    case parse_index_components(index, syntax_list, []) do
+      {:ok, {parsed, _remaining}} -> {:ok, parsed}
+      {:error, reason} -> {:error, reason}
     end
   end
   
@@ -439,6 +430,17 @@ defmodule SnmpLib.OID do
       {:ok, [4, 116, 101, 115, 116]} = SnmpLib.OID.build_table_index("test", {:variable_string})
   """
   @spec build_table_index(term(), term()) :: {:ok, index()} | {:error, atom()}
+  def build_table_index(values, syntax_list) when is_list(values) and is_list(syntax_list) do
+    if length(values) == length(syntax_list) do
+      case build_compound_index(values, syntax_list) do
+        {:ok, index} -> {:ok, index}
+        {:error, reason} -> {:error, reason}
+      end
+    else
+      {:error, :syntax_value_mismatch}
+    end
+  end
+  
   def build_table_index(value, :integer) when is_integer(value) and value >= 0 do
     {:ok, [value]}
   end
@@ -456,26 +458,6 @@ defmodule SnmpLib.OID do
     char_list = String.to_charlist(value)
     index = [length(char_list) | char_list]
     {:ok, index}
-  end
-  
-  def build_table_index(values, syntax_list) when is_list(values) and is_list(syntax_list) do
-    if length(values) == length(syntax_list) do
-      try do
-        index_parts = Enum.zip(values, syntax_list)
-                     |> Enum.map(fn {val, syntax} ->
-                          case build_table_index(val, syntax) do
-                            {:ok, idx} -> idx
-                            {:error, _} -> throw(:error)
-                          end
-                        end)
-        index = List.flatten(index_parts)
-        {:ok, index}
-      catch
-        :error -> {:error, :invalid_compound_index}
-      end
-    else
-      {:error, :syntax_value_mismatch}
-    end
   end
   
   def build_table_index(_, _), do: {:error, :unsupported_syntax}
@@ -578,10 +560,24 @@ defmodule SnmpLib.OID do
 
   ## Private Helper Functions
 
+  defp parse_oid_components(parts) do
+    try do
+      oid_list = Enum.map(parts, fn part ->
+        case parse_oid_component(part) do
+          {:error, reason} -> throw(reason)
+          num -> num
+        end
+      end)
+      {:ok, oid_list}
+    catch
+      reason -> {:error, reason}
+    end
+  end
+
   defp parse_oid_component(component) when is_binary(component) do
     case Integer.parse(component) do
       {num, ""} when num >= 0 -> num
-      _ -> throw(:invalid_component)
+      _ -> {:error, :invalid_oid_string}
     end
   end
 
@@ -610,19 +606,48 @@ defmodule SnmpLib.OID do
   end
 
   defp parse_index_components(index, [], acc) do
-    {Enum.reverse(acc), index}
+    {:ok, {Enum.reverse(acc), index}}
   end
   
   defp parse_index_components(index, [syntax | rest_syntax], acc) do
     case parse_table_index(index, syntax) do
       {:ok, value} ->
         # Calculate how many components were consumed
-        {:ok, consumed_index} = build_table_index(value, syntax)
-        consumed_length = length(consumed_index)
-        remaining_index = Enum.drop(index, consumed_length)
-        parse_index_components(remaining_index, rest_syntax, [value | acc])
-      {:error, _} ->
-        throw(:parse_error)
+        case build_table_index(value, syntax) do
+          {:ok, consumed_index} ->
+            consumed_length = length(consumed_index)
+            remaining_index = Enum.drop(index, consumed_length)
+            parse_index_components(remaining_index, rest_syntax, [value | acc])
+          {:error, reason} ->
+            {:error, reason}
+        end
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp build_string_from_bytes(bytes) do
+    try do
+      string = bytes |> Enum.map(&<<&1>>) |> Enum.join("")
+      {:ok, string}
+    rescue
+      _ -> {:error, :invalid_string_index}
+    end
+  end
+
+  defp build_compound_index(values, syntax_list) do
+    index_parts = Enum.zip(values, syntax_list)
+               |> Enum.map(fn {val, syntax} ->
+                  case build_table_index(val, syntax) do
+                    {:ok, idx} -> idx
+                    {:error, reason} -> {:error, reason}
+                  end
+                end)
+    case Enum.find(index_parts, &match?({:error, _}, &1)) do
+      nil ->
+        index = List.flatten(index_parts)
+        {:ok, index}
+      {:error, reason} -> {:error, reason}
     end
   end
 end

@@ -328,7 +328,7 @@ defmodule SnmpLib.ASN1Test do
     test "rejects malformed structures" do
       # Invalid length - claims 10 bytes but only has 2
       malformed = <<0x02, 0x0A, 0x42, 0x43>>
-      assert {:error, :invalid_structure} = ASN1.validate_ber_structure(malformed)
+      assert {:error, :insufficient_content} = ASN1.validate_ber_structure(malformed)
     end
 
     test "validates empty data" do

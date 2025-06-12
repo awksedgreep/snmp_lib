@@ -130,15 +130,15 @@ defmodule SnmpLib.Manager do
           Logger.debug("Final GET result: #{inspect(result)}")
           result
           
-        {:error, reason} = error ->
+        {:error, reason} ->
           Logger.debug("GET operation failed: #{inspect(reason)}")
           :ok = close_socket(socket)
-          error
+          {:error, reason}
       end
     else
-      {:error, reason} = socket_error ->
+      {:error, reason} ->
         Logger.debug("Socket creation failed: #{inspect(reason)}")
-        socket_error
+        {:error, reason}
     end
   end
   
@@ -583,7 +583,7 @@ defmodule SnmpLib.Manager do
         Logger.debug("Found exception in value field: end_of_mib_view")
         {:error, :end_of_mib_view}
       
-      # Normal value - return type and value (OID is known from input)
+      # Normal value - return type and value only (OID is known from input)
       _ -> 
         Logger.debug("Returning successful value with type: #{inspect({type, value})}")
         {:ok, {type, value}}
@@ -686,15 +686,15 @@ defmodule SnmpLib.Manager do
           Logger.debug("Final GETNEXT v1 result: #{inspect(result)}")
           result
           
-        {:error, reason} = error ->
+        {:error, reason} ->
           Logger.debug("GETNEXT v1 operation failed: #{inspect(reason)}")
           :ok = close_socket(socket)
-          error
+          {:error, reason}
       end
     else
-      {:error, reason} = socket_error ->
+      {:error, reason} ->
         Logger.debug("Socket creation failed for GETNEXT v1: #{inspect(reason)}")
-        socket_error
+        {:error, reason}
     end
   end
   
@@ -716,9 +716,9 @@ defmodule SnmpLib.Manager do
           {next_oid, type, value} -> {:ok, {next_oid, type, value}}
           _ -> {:error, :invalid_response}
         end
-      {:error, reason} = error -> 
+      {:error, reason} -> 
         Logger.debug("GETNEXT v2c+ via GETBULK failed: #{inspect(reason)}")
-        error
+        {:error, reason}
     end
   end
   
