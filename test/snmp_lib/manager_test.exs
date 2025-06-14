@@ -49,7 +49,9 @@ defmodule SnmpLib.ManagerTest do
       end_time = System.monotonic_time(:millisecond)
       
       # Should complete within reasonable time of timeout
-      assert end_time - start_time < 1000
+      # Allow for overhead: socket creation, encoding, etc. can add ~25ms
+      # Using 200ms threshold to avoid flaky tests under load
+      assert end_time - start_time < 200
     end
     
     test "normalizes OID formats correctly" do
@@ -551,7 +553,9 @@ defmodule SnmpLib.ManagerTest do
       end_time = System.monotonic_time(:millisecond)
       
       # Should complete within reasonable time of timeout
-      assert end_time - start_time < 1000
+      # Allow for overhead: socket creation, encoding, etc. can add ~25ms
+      # Using 200ms threshold to avoid flaky tests under load
+      assert end_time - start_time < 200
     end
     
     test "normalizes OID formats correctly" do
